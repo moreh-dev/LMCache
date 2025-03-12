@@ -13,8 +13,8 @@ void multi_layer_kv_transfer(
     const torch::Tensor& slot_mapping,  
     const torch::Device& paged_memory_device, 
     const int page_buffer_size,
-    const bool direction
-);
+    const bool direction,
+    const bool use_mla);
 
 void load_and_reshape_flash(
     torch::Tensor& key_value,
