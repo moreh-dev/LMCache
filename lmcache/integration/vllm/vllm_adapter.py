@@ -51,6 +51,12 @@ class RetrieveStatus(Enum):
     CHUNK_PREFILL = 2  # not last chunk
     NONE = 4
 
+SUPPORTED_BACKEND_METADATA = (
+    FlashAttentionMetadata,
+    FlashMLAMetadata,
+    MLACommonMetadata,
+)
+
 
 def init_lmcache_engine(
     model_config: ModelConfig,
@@ -122,6 +128,7 @@ def init_lmcache_engine(
 
 def broadcast_seq_group_list(
     model_input: "ModelInputForGPUWithSamplingMetadata",
+    parallel_config: ParallelConfig,
     is_driver_worker: bool,
 ) -> "ModelInputForGPUWithSamplingMetadata":
     """Broadcast the `model_input` from driver worker to non-driver workers.
@@ -135,6 +142,9 @@ def broadcast_seq_group_list(
     : return: Original `model_input` if driver_worker.
               Broadcasted `model_input` otherwise.
     """
+    # No need to broadcast if there is only one worker
+    if parallel_config.world_size == 1:
+        return model_input
 
     # broadcast len of `seq_group_metadata_list`
     if is_driver_worker:
@@ -183,19 +193,12 @@ def lmcache_should_retrieve(
 
     :return: RetrieveStatus.
     """
-
-    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
-        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
-
     # model_input doesn't have seq_lens in tp
     # but attn_metadata does
     seq_lens = model_input.attn_metadata.seq_lens
     assert seq_lens is not None
     num_seqs = len(seq_lens)
     retrieve_status = [RetrieveStatus.NONE] * num_seqs
-    has_engine = LMCacheEngineBuilder.get(ENGINE_NAME) is not None
-    if not has_engine:
-        return retrieve_status
 
     attn_meta = model_input.attn_metadata
 
@@ -203,9 +206,6 @@ def lmcache_should_retrieve(
     if not prefill_exist:
         return retrieve_status
     assert model_input.sampling_metadata is not None
-    seq_group_list = model_input.sampling_metadata.seq_groups
-    model_input = broadcast_seq_group_list(model_input, seq_group_list
-                                           is not None)
     seq_group_list = model_input.sampling_metadata.seq_groups
     assert seq_group_list is not None
 
@@ -236,6 +236,7 @@ def lmcache_should_retrieve(
 
 def lmcache_should_store(
     model_input: "ModelInputForGPUWithSamplingMetadata",
+    engine: LMCacheEngine,
 ) -> List[StoreStatus]:
     """Check should we store KV into LMCache for the current model_input.
 
@@ -258,17 +259,9 @@ def lmcache_should_store(
 
         return blend_metadata.processed_layer_count > 0
 
-    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
-        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
-
     seq_lens = model_input.attn_metadata.seq_lens
     assert seq_lens is not None
     store_status = [StoreStatus.NONE] * len(seq_lens)
-    engine = LMCacheEngineBuilder.get(ENGINE_NAME)
-    has_engine = engine is not None
-    if not has_engine:
-        return store_status
-    assert engine is not None
 
     attn_meta = model_input.attn_metadata
 
@@ -277,16 +270,7 @@ def lmcache_should_store(
         return store_status
 
     assert model_input.sampling_metadata is not None
-    seq_group_list = model_input.sampling_metadata.seq_groups
-    # FIXME(Jiayi): Use `seq_group_list` to determine driver worker
-    # Alternative 1, we can pass in a parameter `is_driver_worker`
-    # Alternative 2, make the broadcast in outside, so the `broadcast`
-    # doesn't need to be done twice in `lmcache_retrieve` and
-    # `lmcache_store`
-    # We use this dirty fix now as we don't want to modify the vllm
-    # connector interface for now
-    model_input = broadcast_seq_group_list(model_input, seq_group_list
-                                           is not None)
+
     seq_group_list = model_input.sampling_metadata.seq_groups
     assert seq_group_list is not None
 
@@ -396,9 +380,13 @@ def lmcache_store_kv(
     assert model_input.sampling_metadata is not None
 
     seq_group_list = model_input.sampling_metadata.seq_groups
+    model_input = broadcast_seq_group_list(model_input, seq_group_list
+                                           is not None)
 
     seq_group_list = model_input.sampling_metadata.seq_groups
     assert seq_group_list is not None
+
+    store_status = lmcache_should_store(model_input, engine)
 
     next_start_pos = 0
     for seq_group_idx, seq_group in enumerate(seq_group_list):
@@ -554,7 +542,8 @@ def lmcache_retrieve_kv(
 
     assert model_input.sampling_metadata is not None
     seq_group_list = model_input.sampling_metadata.seq_groups
-
+    model_input = broadcast_seq_group_list(model_input, seq_group_list
+                                           is not None)
     seq_group_list = model_input.sampling_metadata.seq_groups
     assert seq_group_list is not None
 
