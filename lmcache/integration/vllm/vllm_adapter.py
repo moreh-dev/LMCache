@@ -143,7 +143,7 @@ def broadcast_seq_group_list(
               Broadcasted `model_input` otherwise.
     """
     # No need to broadcast if there is only one worker
-    if parallel_config.world_size == 1:
+    if parallel_config.world_size <= 1:
         return model_input
 
     # broadcast len of `seq_group_metadata_list`
@@ -335,7 +335,6 @@ def lmcache_store_kv(
     model_executable: torch.nn.Module,
     model_input: "ModelInputForGPUWithSamplingMetadata",
     kv_caches: List[torch.Tensor],
-    store_status: List[StoreStatus],
     hidden_states: Optional[torch.Tensor] = None,
 ) -> None:
     """Store the KV caches into LMCache for the current model_input.
@@ -380,9 +379,8 @@ def lmcache_store_kv(
     assert model_input.sampling_metadata is not None
 
     seq_group_list = model_input.sampling_metadata.seq_groups
-    model_input = broadcast_seq_group_list(model_input, seq_group_list
-                                           is not None)
-
+    model_input = broadcast_seq_group_list(model_input, parallel_config,
+                                           seq_group_list is not None)
     seq_group_list = model_input.sampling_metadata.seq_groups
     assert seq_group_list is not None
 
@@ -479,11 +477,12 @@ def lmcache_store_kv(
 
 @_lmcache_nvtx_annotate
 def lmcache_retrieve_kv(
+    model_config: ModelConfig,
+    parallel_config: ParallelConfig,
+    cache_config: CacheConfig,
     model_executable: torch.nn.Module,
     model_input: "ModelInputForGPUWithSamplingMetadata",
-    cache_config: CacheConfig,
     kv_caches: List[torch.Tensor],
-    retrieve_status: List[RetrieveStatus],
 ) -> Tuple["ModelInputForGPUWithSamplingMetadata", bool, Union[
         torch.Tensor, IntermediateTensors]]:
     """Retrieve the KV caches from LMCache for the current model_input. And 
@@ -542,8 +541,8 @@ def lmcache_retrieve_kv(
 
     assert model_input.sampling_metadata is not None
     seq_group_list = model_input.sampling_metadata.seq_groups
-    model_input = broadcast_seq_group_list(model_input, seq_group_list
-                                           is not None)
+    model_input = broadcast_seq_group_list(model_input, parallel_config,
+                                           seq_group_list is not None)
     seq_group_list = model_input.sampling_metadata.seq_groups
     assert seq_group_list is not None
 
