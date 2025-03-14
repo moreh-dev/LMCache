@@ -4,8 +4,12 @@ from typing import List, Optional, no_type_check
 
 import torch
 
-from lmcache.experimental.memory_management import (MemoryAllocatorInterface,
-                                                    MemoryFormat, MemoryObj)
+from lmcache.experimental.memory_management import (
+    MemoryAllocatorInterface,
+    MemoryFormat,
+    MemoryObj,
+    TensorMemoryObj
+)
 from lmcache.experimental.protocol import (ClientMetaMessage, Constants,
                                            ServerMetaMessage)
 from lmcache.experimental.storage_backend.connector.base_connector import \
@@ -45,14 +49,10 @@ class LMCServerConnector(RemoteConnector):
 
         # TODO(Jiayi): Format will be used once we support
         # compressed memory format
-        memory_obj = self.memory_allocator.allocate(
-            meta.shape,
-            meta.dtype,
-            meta.fmt,
+        memory_obj = TensorMemoryObj(
+            torch.empty(meta.shape, dtype=meta.dtype, device='cpu'),
+            metadata=meta,
         )
-        if memory_obj is None:
-            logger.warning("Failed to allocate memory during remote receive")
-            return None
 
         buffer = memory_obj.byte_array
         view = memoryview(buffer)

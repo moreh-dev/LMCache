@@ -233,9 +233,17 @@ class StorageManager:
             #    continue
 
             # NOTE(Jiayi): bypass the allocator for now
-            memory_obj = backend.get_blocking(key)
+            tmp_memory_obj = backend.get_blocking(key)
             if memory_obj is not None:
+                memory_obj = self.allocate(tmp_memory_obj.get_shape(),
+                                           tmp_memory_obj.get_dtype())
+                if memory_obj is None:
+                    logger.warning("Memory allocation failed in get_blocking")
+                    return None
+                memory_obj.tensor.copy_(tmp_memory_obj.tensor)
+                memory_obj.metadata.fmt = tmp_memory_obj.metadata.fmt
                 self._update_hot_cache(key, memory_obj)
+                del tmp_memory_obj
                 return memory_obj
 
         return None
