@@ -243,6 +243,7 @@ class StorageManager:
                 memory_obj.tensor.copy_(tmp_memory_obj.tensor)
                 memory_obj.metadata.fmt = tmp_memory_obj.metadata.fmt
                 self._update_hot_cache(key, memory_obj)
+                self.hot_cache.move_to_end(key)
                 del tmp_memory_obj
                 return memory_obj
 
