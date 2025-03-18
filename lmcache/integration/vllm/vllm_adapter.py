@@ -506,7 +506,7 @@ def lmcache_retrieve_kv(
         end_pos = start_pos + slen
         total_seq_len = seq_lens[seq_data_idx]
 
-        full_token_tensor = torch.tensor(input_tokens[start_pos:end_pos], device="cpu")
+        full_token_tensor = input_tokens[start_pos:end_pos]
         full_tokens_list.append(full_token_tensor)
 
         vllm_num_required_tokens = end_pos - start_pos
@@ -518,18 +518,6 @@ def lmcache_retrieve_kv(
         # number of tokens already computed by vllm
         # (e.g., chunk prefill, prefix caching)
         vllm_num_computed_tokens = total_seq_len - vllm_num_required_tokens
-
-        # NOTE: No need to retrieve from lmc if the current sequence is
-        # in DECODE stage
-        if retrieve_status[idx] == RetrieveStatus.NONE:
-            assert vllm_num_required_tokens == 1
-            total_seq_len = seq_lens[idx]
-            num_computed_tokens_list.append(vllm_num_computed_tokens)
-            lmc_num_computed_tokens_list.append(0)
-            num_request_not_found += 1
-            idx += 1
-            logger.debug("Injected token number: 0. This is DECODE")
-            continue
 
         # NOTE: No need to retrieve from lmc if the number of tokens
         # to be retrieved is small
@@ -549,24 +537,11 @@ def lmcache_retrieve_kv(
         )
         token_mask[:vllm_num_computed_tokens_align] = False
 
-        # TODO(Jiayi): Please get rid of this in the future
-        # Please only pass the required slot_mapping to the engine
-        if vllm_num_computed_tokens > 0:
-            slot_mapping_req_full = torch.full(
-                (total_seq_len,),
-                -1,
-                device=slot_mapping.device,
-                dtype=slot_mapping.dtype,
-            )
-            slot_mapping_req_full[vllm_num_computed_tokens:] = slot_mapping[
-                start_pos:end_pos
-            ]
-        else:
-            slot_mapping_req_full = slot_mapping[start_pos:end_pos]
+        slot_mapping_req_full = slot_mapping[start_pos:end_pos]
 
         # call lmcache retrieve
         ret_token_mask, seq_hidden_states = engine.retrieve(
-            full_token_tensor,
+            full_token_tensor.cpu(),
             token_mask,
             kvcaches=kv_caches,
             slot_mapping=slot_mapping_req_full,
@@ -617,169 +592,6 @@ def lmcache_retrieve_kv(
         hidden_states = torch.cat(hidden_states_list, dim=0).to(device)
         return model_input, True, hidden_states
 
-    if num_request_not_found < seq_cnt:
-        rebuilt_model_input = build_partial_prefill_input(
-            model_input,
-            full_tokens_list,
-            num_computed_tokens_list,
-            start_pos_list,
-            slot_mapping,
-            lmc_num_computed_tokens_list,
-            is_prefill_list,
-            do_sample_list,
-            kv_caches[0][0].device,
-            cache_config,
-        )
-        logger.debug("Rebuilt the input!")
-        return rebuilt_model_input, False, None
 
     logger.debug("Returning the original input!")
     return model_input, False, None
-
-
-def build_partial_prefill_input(
-    model_input: "ModelInputForGPUWithSamplingMetadata",
-    full_tokens_list: List[torch.Tensor],
-    num_computed_tokens_list: List[int],
-    start_pos_list: List[int],
-    slot_mapping_flat: torch.Tensor,
-    lmc_num_computed_tokens_list: List[int],
-    is_prefill_list: List[bool],
-    do_sample_list: List[bool],
-    device: torch.device,
-    cache_config: CacheConfig,
-) -> "ModelInputForGPUWithSamplingMetadata":
-    """Helper function to rebuild the model input for the current request."""
-    assert model_input.attn_metadata is not None
-
-    assert isinstance(
-        model_input.attn_metadata, SUPPORTED_BACKEND_METADATA
-    ), f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
-
-    assert model_input.attn_metadata.context_lens_tensor is not None
-    assert model_input.attn_metadata.block_tables is not None
-    assert model_input.attn_metadata.query_start_loc is not None
-    assert model_input.input_positions is not None
-
-    rebuilt_input_tokens = []
-    rebuilt_input_positions = []
-    rebuilt_query_lens = []
-    rebuilt_num_prefills = 0
-    rebuilt_num_prefill_tokens = 0
-    rebuilt_slot_mapping = []
-    rebuilt_max_query_len = 0
-
-    rebuilt_block_tables = []
-
-    rebuilt_query_start_loc = [0]
-    rebuilt_context_lens_tensor = []
-    rebuilt_selected_token_indices = []
-
-    last_query_start_loc = 0
-
-    # recounting query and context lengths
-    for idx in range(len(full_tokens_list)):
-        token_tensor = full_tokens_list[idx]
-        num_token = len(token_tensor)
-        num_computed_token = num_computed_tokens_list[idx]
-        start_pos = start_pos_list[idx]
-        is_prefill = is_prefill_list[idx]
-        lmc_num_computed_tokens = lmc_num_computed_tokens_list[idx]
-        rebuilt_input_tokens.append(token_tensor[num_computed_token:])
-        q_len = num_token - num_computed_token
-        assert q_len > 0
-        rebuilt_query_lens.append(q_len)
-        start_input_pos_idx = start_pos + lmc_num_computed_tokens
-        end_input_pos_idx = start_input_pos_idx + q_len
-        rebuilt_input_positions.append(
-            model_input.input_positions[start_input_pos_idx:end_input_pos_idx]
-        )
-        # Attn metadata-related
-        if is_prefill:
-            rebuilt_num_prefills += 1
-            rebuilt_num_prefill_tokens += q_len
-        else:
-            assert q_len == 1
-
-        start_slot_idx = start_pos + lmc_num_computed_tokens
-        end_slot_idx = start_slot_idx + q_len
-        new_slot_mapping = slot_mapping_flat[start_slot_idx:end_slot_idx]
-        rebuilt_slot_mapping.append(new_slot_mapping)
-        rebuilt_max_query_len = max(q_len, rebuilt_max_query_len)
-
-        last_query_start_loc += q_len
-        rebuilt_query_start_loc.append(last_query_start_loc)  # start with 0
-        rebuilt_context_lens_tensor.append(num_computed_token)
-
-        # recover `block_table`
-        if len(model_input.attn_metadata.block_tables[idx]) > 0:
-            rebuilt_block_tables.append(model_input.attn_metadata.block_tables[idx])
-        else:
-            slot_mapping_req = slot_mapping_flat[start_pos:end_slot_idx]
-            vllm_block_size = cache_config.block_size
-            rebuilt_block_table = (
-                slot_mapping_req[::16].to(torch.int32) // vllm_block_size
-            )
-            rebuilt_block_tables.append(rebuilt_block_table)
-
-        # Sampling metadata related
-        # seq_groups (use rebuilt query lens)
-        if do_sample_list[idx]:
-            rebuilt_selected_token_indices.append(last_query_start_loc - 1)
-
-    # rebuilt attn_metadata
-    rebuilt_attn_metadata = deepcopy(model_input.attn_metadata)
-    rebuilt_attn_metadata.num_prefills = rebuilt_num_prefills
-    rebuilt_attn_metadata.num_prefill_tokens = rebuilt_num_prefill_tokens
-    rebuilt_attn_metadata.slot_mapping = torch.cat(rebuilt_slot_mapping).to(device)
-    rebuilt_attn_metadata.max_query_len = rebuilt_max_query_len
-
-    rebuilt_attn_metadata.block_tables = pad_sequence(
-        rebuilt_block_tables, batch_first=True
-    ).to(device)
-
-    rebuilt_attn_metadata.query_start_loc = torch.tensor(
-        rebuilt_query_start_loc, dtype=model_input.attn_metadata.query_start_loc.dtype
-    ).to(device)
-    rebuilt_attn_metadata.context_lens_tensor = torch.tensor(
-        rebuilt_context_lens_tensor,
-        dtype=model_input.attn_metadata.context_lens_tensor.dtype,
-    ).to(device)
-
-    rebuilt_attn_metadata._cached_prefill_metadata = None
-    rebuilt_sampling_metadata = None
-    # rebuilt sampling_metadata
-    if model_input.sampling_metadata is not None:
-        rebuilt_sampling_metadata = deepcopy(model_input.sampling_metadata)
-        for idx, q_len in enumerate(rebuilt_query_lens):
-            if rebuilt_sampling_metadata.seq_groups is not None:
-                rebuilt_sampling_metadata.seq_groups[idx].query_len = q_len
-
-        rebuilt_sampling_metadata.selected_token_indices = torch.tensor(
-            rebuilt_selected_token_indices,
-            dtype=model_input.sampling_metadata.selected_token_indices.dtype,
-        ).to(device)
-
-    # import here to avoid circular import.
-    from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
-
-    rebuilt_model_input = ModelInputForGPUWithSamplingMetadata(
-        input_tokens=torch.cat(rebuilt_input_tokens).to(device),
-        input_positions=torch.cat(rebuilt_input_positions).to(device),
-        seq_lens=model_input.seq_lens,
-        query_lens=rebuilt_query_lens,
-        lora_mapping=model_input.lora_mapping,
-        lora_requests=model_input.lora_requests,
-        attn_metadata=rebuilt_attn_metadata,
-        prompt_adapter_mapping=model_input.prompt_adapter_mapping,
-        prompt_adapter_requests=model_input.prompt_adapter_requests,
-        multi_modal_kwargs=model_input.multi_modal_kwargs,
-        request_ids_to_seq_ids=model_input.request_ids_to_seq_ids,
-        finished_requests_ids=model_input.finished_requests_ids,
-        virtual_engine=model_input.virtual_engine,
-        sampling_metadata=rebuilt_sampling_metadata,
-        is_prompt=model_input.is_prompt,
-        async_callback=model_input.async_callback,
-    )
-
-    return rebuilt_model_input
