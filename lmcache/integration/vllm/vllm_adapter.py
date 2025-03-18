@@ -406,7 +406,6 @@ def lmcache_store_kv(
         slot_mapping_req_full = slot_mapping[start_pos:end_pos]
         skip_leading_tokens = 0
         kv_tensors_mask = None
-        kv_tensors_mask[:skip_leading_tokens] = False
 
         engine.store(
             current_tokens,
@@ -505,7 +504,7 @@ def lmcache_retrieve_kv(
     for seq_data_idx, slen in enumerate(seq_lens):
         start_pos = next_start_pos
         end_pos = start_pos + slen
-        seq_len = seq_lens[seq_data_idx]
+        total_seq_len = seq_lens[seq_data_idx]
 
         full_token_tensor = torch.tensor(input_tokens[start_pos:end_pos], device="cpu")
         full_tokens_list.append(full_token_tensor)
