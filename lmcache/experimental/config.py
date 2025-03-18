@@ -158,7 +158,7 @@ class LMCacheEngineConfig:
         match remote_url:
             case None:
                 pass
-            case url if re.match(r"(.*)://(.*):(\d+)", url):
+            case url if all([re.match(r"(.*)://(.*):(\d+)", x.strip()) for x in url.split(",")]):
                 pass
             case _:
                 raise ValueError(f"Invalid remote storage url: {remote_url}")

@@ -36,8 +36,9 @@ class RemoteBackend(StorageBackendInterface):
 
         assert config.remote_url is not None
         # Initialize connection
-        self.connection = CreateConnector(config.remote_url, loop,
-                                          memory_allocator)
+        remote_urls = [url.strip() for url in config.remote_url.split(",")]
+        self.remote_url = remote_urls[metadata.worker_id % len(remote_urls)]
+        self.connection = CreateConnector(self.remote_url, loop, memory_allocator)
 
         self.remote_url = config.remote_url
 
