@@ -4,6 +4,7 @@ import multiprocessing
 import requests
 from typing import Dict, List, Optional
 
+import socket
 import time
 import torch
 import threading
@@ -28,6 +29,19 @@ from lmcache.utils import _lmcache_nvtx_annotate
 
 logger = init_logger(__name__)
 
+def is_current_host(ip: str) -> bool:
+    try:
+        # Resolve 'localhost' to '127.0.0.1'
+        if ip in ("127.0.0.1", "localhost"):
+            return True
+
+        # Get the current host's IP addresses
+        local_ips = socket.gethostbyname_ex(socket.gethostname())[2]
+
+        # Compare with the given IP
+        return ip in local_ips
+    except socket.error:
+        return False
 
 class CacheEngineEndSignal:
     pass
@@ -67,21 +81,23 @@ class LMCacheEngine:
         self.enable_p2p = config.enable_p2p
         self.session = requests.Session()
 
-
-        
         # 
         # connecto to decode peer
-
-
-
         # decode_prefetch_tasks must be accessed in self.StorageManager.loop
         self.decode_prefetch_tasks = {}
 
+        if metadata.is_kv_producer or metadata.is_kv_consumer:
+            assert len(self.config.zmq_endpoints) > self.metadata.worker_id, \
+                f"zmq endpoint infor for worker {self.metadata.worker_id} is missing"
+            zmq_endpoint = self.config.zmq_endpoints[self.metadata.worker_id]
+            zmq_host = zmq_endpoint["addr"]
+            zmq_port = zmq_endpoint["port"]
+            print(f"\n ~~~~~~ {zmq_host}   {zmq_port}")
 
         if metadata.is_kv_producer:
             context = zmq.asyncio.Context()
             self.socket = context.socket(zmq.PUSH)
-            self.socket.connect("tcp://localhost:5555")
+            self.socket.connect(f"tcp://{zmq_host}:{zmq_port}")
             self.zmq_loop = asyncio.new_event_loop()
             self.zmq_thread = threading.Thread(target=self.zmq_loop.run_forever)
             self.zmq_thread.start()
@@ -89,7 +105,9 @@ class LMCacheEngine:
         if metadata.is_kv_consumer:
             context = zmq.Context()
             self.socket = context.socket(zmq.PULL)
-            self.socket.bind("tcp://*:5555")
+            if not is_current_host(zmq_host):
+                raise ValueError(f"zmq host {zmq_host} is not current host")
+            self.socket.bind(f"tcp://*:{zmq_port}")
             self.decode_prefetch_tasks = defaultdict(int)
             self.listen_thread = threading.Thread(target=self.listen_zmq)
             self.listen_thread.start()
@@ -276,7 +294,7 @@ class LMCacheEngine:
 
             if msg.get("total") == 0:
                 logger.info("new same request comming!!")
-                self.session.post("http://127.0.0.1:8080/v1/kv_cache_ready", json={"request_id": msg.get("request_id")})
+                self.session.post(self.config.kv_cache_ready_url, json={"request_id": msg.get("request_id"), "world_size": self.metadata.world_size})
                 continue
 
             memory_obj = self.storage_manager.get(msg.get("key"))
@@ -287,8 +305,8 @@ class LMCacheEngine:
             self.decode_prefetch_tasks[msg.get("request_id")] += 1
             if self.decode_prefetch_tasks[msg.get("request_id")] == msg.get("total"):
                 del self.decode_prefetch_tasks[msg.get("request_id")]
-                logger.info("new request comming!!")
-                self.session.post("http://127.0.0.1:8080/v1/kv_cache_ready", json={"request_id": msg.get("request_id")})
+                logger.info(f"new request comming!!  {self.metadata.world_size}")
+                self.session.post(self.config.kv_cache_ready_url, json={"request_id": msg.get("request_id"), "world_size": self.metadata.world_size})
             
             # TODO: async get
             # start prefetching
