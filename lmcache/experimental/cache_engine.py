@@ -180,7 +180,6 @@ class LMCacheEngine:
         else:
             monitor_req_id = self.stats_monitor.on_store_request(len(tokens))
 
-        last_token_idx = 0
         assert "request_id" in kwargs
         request_id = kwargs["request_id"]
 

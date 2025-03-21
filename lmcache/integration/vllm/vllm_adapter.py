@@ -458,7 +458,7 @@ def lmcache_store_kv(
             else:
                 slot_mapping_req_full = slot_mapping[start_pos:end_pos]
 
-            # if skip_leading_tokens < seq_len:
+        if skip_leading_tokens < seq_len:
                 # assert skip_leading_tokens % engine.config.chunk_size == 0
 
                 # TODO(Jiayi): Turing is not supported yet
@@ -480,16 +480,20 @@ def lmcache_store_kv(
                             request_id = request_ids[seq_group_idx],
                             hidden_states=hidden_states)
 
-            # else:
-            #     stored_token_num = 0
-            #     skip_leading_tokens = seq_len
-            #     if engine.metadata.is_kv_producer:
-            #         engine.notify_decoder(request_ids[seq_group_idx])
+        else:
+            stored_token_num = 0
+            skip_leading_tokens = seq_len
+            engine.store_hidden_states(current_tokens.cpu(), 
+                                       hidden_states,
+                                       request_ids[seq_group_idx],
+                                       1
+                                       )
 
 
-            logger.debug(f"Store skips {skip_leading_tokens} tokens "\
+
+        logger.debug(f"Store skips {skip_leading_tokens} tokens "\
                     f"and then stores {stored_token_num} tokens")
-            seq_data_idx += 1
+        seq_data_idx += 1
 
 
 @_lmcache_nvtx_annotate
