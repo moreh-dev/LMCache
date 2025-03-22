@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
 
 import yaml
 
@@ -33,6 +33,9 @@ class LMCacheEngineConfig:
     lookup_url: Optional[str]  # the url of the lookup server
     distributed_url: Optional[str]  # the url of the distributed server
 
+    kv_cache_ready_url: Optional[str] 
+    zmq_endpoints: List[Dict[str, Any]] 
+
     @staticmethod
     def from_defaults(
         chunk_size: int = 256,
@@ -49,13 +52,16 @@ class LMCacheEngineConfig:
         enable_p2p: bool = False,
         lookup_url: Optional[str] = None,
         distributed_url: Optional[str] = None,
+        kv_cache_ready_url: Optional[str] = None,
+        zmq_endpoints: Optional[List[Dict[str, Any]]] = [],
     ) -> "LMCacheEngineConfig":
         return LMCacheEngineConfig(chunk_size, local_cpu, max_local_cpu_size,
                                    local_disk, max_local_disk_size, remote_url,
                                    remote_serde, save_decode_cache,
                                    enable_blending, blend_recompute_ratio,
                                    blend_min_tokens, enable_p2p, lookup_url,
-                                   distributed_url)
+                                   distributed_url, kv_cache_ready_url,
+                                   zmq_endpoints)
 
     @staticmethod
     def from_legacy(
@@ -162,6 +168,14 @@ class LMCacheEngineConfig:
                 pass
             case _:
                 raise ValueError(f"Invalid remote storage url: {remote_url}")
+            
+        kv_cache_ready_url = config.get("kv_cache_ready_url", "")
+
+        zmq_endpoints = []
+        for entry in config.get("zmq_endpoints", []):
+            if "addr" in entry and "port" in entry:
+                entry["addr"] = f"{entry['addr']}" 
+                zmq_endpoints.append(entry)
 
         return LMCacheEngineConfig(
             chunk_size,
@@ -178,6 +192,8 @@ class LMCacheEngineConfig:
             enable_p2p,
             lookup_url,
             distributed_url,
+            kv_cache_ready_url,
+            zmq_endpoints,
         )
 
     @staticmethod
@@ -250,6 +266,13 @@ class LMCacheEngineConfig:
                                       config.lookup_url)
         config.distributed_url = parse_env(get_env_name("distributed_url"),
                                            config.distributed_url)
+        
+        config.kv_cache_ready_url = parse_env(get_env_name("kv_cache_ready_url"), config.kv_cache_ready_url)
+
+        zmq_endpoints_str = parse_env(get_env_name("zmq_endpoints"), "[]")
+
+        raw_zmq_endpoints = eval(zmq_endpoints_str) if zmq_endpoints_str else []
+        config.zmq_endpoints = [{"addr": f"{e['addr']}", "port": e["port"]} for e in raw_zmq_endpoints]
 
         return config
 
@@ -268,4 +291,6 @@ class LMCacheEngineConfig:
             blend_min_tokens=self.blend_min_tokens,
             blend_separator="[BLEND_SEP]",
             blend_add_special_in_precomp=False,
+            # kv_cache_ready_url="",
+            # zmq_endpoints=[],
         )
