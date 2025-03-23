@@ -105,8 +105,8 @@ class LMCacheEngine:
         if metadata.is_kv_consumer:
             context = zmq.Context()
             self.socket = context.socket(zmq.PULL)
-            if not is_current_host(zmq_host):
-                raise ValueError(f"zmq host {zmq_host} is not current host")
+            # if not is_current_host(zmq_host):
+            #     raise ValueError(f"zmq host {zmq_host} is not current host")
             self.socket.bind(f"tcp://*:{zmq_port}")
             self.decode_prefetch_tasks = defaultdict(int)
             self.listen_thread = threading.Thread(target=self.listen_zmq)
@@ -184,7 +184,7 @@ class LMCacheEngine:
         request_id = kwargs["request_id"]
 
         #compute how many new tokens,how many chunks
-        num_true = sum(mask).item()
+        num_true = len(tokens) if mask is None else torch.sum(mask).item()
 
         # total kv_kvcache to store
         total = num_true // self.token_database.chunk_size
