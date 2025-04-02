@@ -11,15 +11,20 @@ if TYPE_CHECKING:
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
 
 from vllm.attention.backends.flash_attn import FlashAttentionMetadata
+from vllm.attention.backends.flashmla import FlashMLAMetadata
+from vllm.attention.backends.mla.common import MLACommonMetadata
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.sequence import IntermediateTensors
+from vllm.utils import get_kv_cache_torch_dtype
 from vllm.utils import get_kv_cache_torch_dtype
 
 from lmcache.config import LMCacheEngineMetadata
 from lmcache.experimental.cache_engine import (LMCacheEngine,
                                                LMCacheEngineBuilder)
 from lmcache.experimental.config import LMCacheEngineConfig
-from lmcache.experimental.gpu_connector import VLLMPagedMemGPUConnectorV2
+from lmcache.experimental.gpu_connector import (GPUConnectorInterface,
+                                                VLLMPagedMemGPUConnectorMLA,
+                                                VLLMPagedMemGPUConnectorV2)
 from lmcache.integration.vllm.utils import ENGINE_NAME, lmcache_get_config
 from lmcache.logging import init_logger
 from lmcache.utils import _lmcache_nvtx_annotate
@@ -30,6 +35,9 @@ from lmcache.utils import _lmcache_nvtx_annotate
 logger = init_logger(__name__)
 
 LMCACHE_CUDA_STREAM = torch.cuda.Stream()
+
+SUPPORTED_BACKEND_METADATA = (FlashAttentionMetadata, FlashMLAMetadata,
+                              MLACommonMetadata)
 
 
 class StoreStatus(Enum):
@@ -77,21 +85,38 @@ def init_lmcache_engine(
     kv_dtype = get_kv_cache_torch_dtype(cache_config.cache_dtype,
                                         model_config.dtype)
 
+    use_mla = False
+    if hasattr(model_config, "use_mla") and isinstance(
+            model_config.use_mla, bool) and model_config.use_mla:
+        use_mla = True
+
+    if use_mla and config.remote_serde != "naive":
+        raise ValueError("MLA onl works with naive serde mode..")
+
     # construct kv shape (for mem pool)
     num_layer = model_config.get_num_layers(parallel_config)
     chunk_size = config.chunk_size
     num_kv_head = model_config.get_num_kv_heads(parallel_config)
     head_size = model_config.get_head_size()
-    kv_shape = (num_layer, 2, chunk_size, num_kv_head, head_size)
+    if use_mla:
+        kv_shape = (num_layer, 1, chunk_size, 1, head_size)
+    else:
+        kv_shape = (num_layer, 2, chunk_size, num_kv_head, head_size)
 
     # Change current device.
     torch.cuda.device(parallel_config.rank)
     metadata = LMCacheEngineMetadata(model_config.model,
                                      parallel_config.world_size,
                                      parallel_config.rank, "vllm", kv_dtype,
-                                     kv_shape)
-    hidden_dim_size = num_kv_head * head_size
-    vllm_gpu_connector = VLLMPagedMemGPUConnectorV2(hidden_dim_size, num_layer)
+                                     kv_shape, use_mla)
+
+    vllm_gpu_connector: GPUConnectorInterface
+    if use_mla:
+        vllm_gpu_connector = VLLMPagedMemGPUConnectorMLA(head_size, num_layer)
+    else:
+        hidden_dim_size = num_kv_head * head_size
+        vllm_gpu_connector = VLLMPagedMemGPUConnectorV2(
+            hidden_dim_size, num_layer)
     assert isinstance(config, LMCacheEngineConfig), \
         "LMCache experimental configuration is should be passed."
     engine = LMCacheEngineBuilder.get_or_create(ENGINE_NAME, config, metadata,
@@ -164,8 +189,8 @@ def lmcache_should_retrieve(
     :return: RetrieveStatus.
     """
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
-        "Only FlashAttention backend is supported for now."
+    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
+        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
 
     # model_input doesn't have seq_lens in tp
     # but attn_metadata does
@@ -238,8 +263,8 @@ def lmcache_should_store(
 
         return blend_metadata.processed_layer_count > 0
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
-        "Only FlashAttention backend is supported for now."
+    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
+        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
 
     seq_lens = model_input.attn_metadata.seq_lens
     assert seq_lens is not None
@@ -350,8 +375,8 @@ def lmcache_store_kv(
     engine = LMCacheEngineBuilder.get(ENGINE_NAME)
     assert engine is not None, "LMCache engine is not initialized."
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
-        "Only FlashAttention backend is supported for now."
+    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
+        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
 
     seq_lens = model_input.attn_metadata.seq_lens
     assert seq_lens is not None
@@ -496,19 +521,19 @@ def lmcache_retrieve_kv(
     :return: The boolean value to indicate whether the 
              entire execute_model should be skipped
     """
-
     engine = LMCacheEngineBuilder.get(ENGINE_NAME)
     assert engine is not None, "LMCache engine is not initialized."
 
     if engine.config.enable_blending:
         return model_input, False, None
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
-        "Only FlashAttention backend is supported for now."
+    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
+        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
 
     query_start_loc = model_input.attn_metadata.query_start_loc
     assert query_start_loc is not None
     slot_mapping = model_input.attn_metadata.slot_mapping.flatten()
+
     assert slot_mapping is not None
     seq_lens = model_input.attn_metadata.seq_lens
     assert seq_lens is not None
@@ -611,7 +636,9 @@ def lmcache_retrieve_kv(
                 full_token_tensor,
                 token_mask,
                 kvcaches=kv_caches,
-                slot_mapping=slot_mapping_req_full)
+                slot_mapping=slot_mapping_req_full,
+                use_mla=engine.metadata.use_mla,
+            )
             lmc_num_computed_tokens = max(
                     torch.sum(ret_token_mask).item() - \
                     (vllm_num_computed_tokens - vllm_num_computed_tokens_align),
@@ -655,6 +682,12 @@ def lmcache_retrieve_kv(
     assert idx == seq_cnt
     assert len(lmc_num_computed_tokens_list) == seq_cnt
     assert len(num_computed_tokens_list) == seq_cnt
+
+    is_all_prefill = all(
+        [status == RetrieveStatus.PREFILL for status in retrieve_status])
+
+    if is_all_prefill and num_request_not_found == 0:
+        return model_input, False, None
 
     is_all_chunk_prefill = all(
         [status == RetrieveStatus.CHUNK_PREFILL for status in retrieve_status])
@@ -708,8 +741,10 @@ def build_partial_prefill_input(
     """Helper function to rebuild the model input for the current request.
     """
     assert model_input.attn_metadata is not None
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
-        "Only FlashAttention backend is supported for now."
+
+    assert isinstance(model_input.attn_metadata, SUPPORTED_BACKEND_METADATA), \
+        f"Only backend with {SUPPORTED_BACKEND_METADATA} is supported for now."
+
     assert model_input.attn_metadata.context_lens_tensor is not None
     assert model_input.attn_metadata.block_tables is not None
     assert model_input.attn_metadata.query_start_loc is not None
