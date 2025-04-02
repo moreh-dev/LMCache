@@ -37,8 +37,8 @@ class LMCacheConnector(KVConnectorBase):
         from lmcache.integration.vllm.utils import ENGINE_NAME
         from lmcache.integration.vllm.vllm_adapter import (
             RetrieveStatus, StoreStatus, init_lmcache_engine,
-            lmcache_retrieve_kv, lmcache_should_store, lmcache_store_kv,
-            lmcache_should_retrieve)
+            lmcache_retrieve_kv, lmcache_should_retrieve, lmcache_should_store,
+            lmcache_store_kv)
         logger.info("Initializing LMCacheConfig under kv_transfer_config %s",
                     self.transfer_config)
 
@@ -71,9 +71,10 @@ class LMCacheConnector(KVConnectorBase):
         # TODO (Jiayi): Need to support chunked prefill
         retrieve_status = self.lmcache_should_retrieve(model_input)
 
-        model_input, bypass_model_exec, hidden_or_intermediate_states = self.lmcache_retrieve_kv(
-            model_executable, model_input, self.cache_config, kv_caches,
-            retrieve_status)
+        model_input, bypass_model_exec, hidden_or_intermediate_states = \
+            self.lmcache_retrieve_kv(
+                model_executable, model_input, self.cache_config, kv_caches,
+                retrieve_status)
 
         if hidden_or_intermediate_states is None:
             bypass_model_exec = False

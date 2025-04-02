@@ -16,7 +16,6 @@ from vllm.attention.backends.mla.common import MLACommonMetadata
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.sequence import IntermediateTensors
 from vllm.utils import get_kv_cache_torch_dtype
-from vllm.utils import get_kv_cache_torch_dtype
 
 from lmcache.config import LMCacheEngineMetadata
 from lmcache.experimental.cache_engine import (LMCacheEngine,
@@ -91,7 +90,7 @@ def init_lmcache_engine(
         use_mla = True
 
     if use_mla and config.remote_serde != "naive":
-        raise ValueError("MLA onl works with naive serde mode..")
+        raise ValueError("MLA only works with naive serde mode..")
 
     # construct kv shape (for mem pool)
     num_layer = model_config.get_num_layers(parallel_config)
