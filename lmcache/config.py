@@ -23,7 +23,7 @@ class LMCacheEngineMetadata:
     """ (num_layer, 2, chunk_size, num_kv_head, head_size) """
     kv_shape: tuple[int, int, int, int, int]
     """ whether use MLA"""
-    use_mla: bool
+    use_mla: bool = False
 
 
 @dataclass
