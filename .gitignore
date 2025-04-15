@@ -101,3 +101,5 @@ lmcache/experimental/tests
 
 # reference kernels
 /csrc/temp.cu
+
+/csrc/hip_output
