@@ -22,17 +22,13 @@ installed_dependencies = [
 	"prometheus_client",
 	"infinistore",
 	"msgspec",
+    "torchac_cuda >= 0.2.5",
 ]
 
 is_hip = _is_hip()
 
 if not is_hip:
-    installed_dependencies.append([
-        "torchac_cuda >= 0.2.5",
-        "nvtx",
-    ])
-else:
-    installed_dependencies.append("torchac_rocm >= 0.2.5")
+    installed_dependencies.append("nvtx")
 
 
 extra_compile_args = {}
