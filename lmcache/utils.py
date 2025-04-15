@@ -4,11 +4,14 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 import torch
-from nvtx import annotate  # type: ignore
+if torch.cuda.is_available() and torch.version.cuda:
+    from nvtx import annotate  # type: ignore
 
 # Type definition
 KVCache = Tuple[Tuple[torch.Tensor, torch.Tensor], ...]
 
+def _is_hip():
+    return torch.cuda.is_available() and torch.version.hip
 
 @dataclass
 class DiskCacheMetadata:
@@ -76,6 +79,9 @@ def _get_color_for_nvtx(name):
 
 def _lmcache_nvtx_annotate(func, domain="lmcache"):
     """Decorator for applying nvtx annotations to methods in lmcache."""
+    if _is_hip():
+        return func
+
     return annotate(
         message=func.__qualname__,
         color=_get_color_for_nvtx(func.__qualname__),
