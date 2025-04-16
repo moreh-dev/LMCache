@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from vllm.worker.model_runner import ModelInputForGPUWithSamplingMetadata
 
 from vllm.attention.backends.flash_attn import FlashAttentionMetadata
+from vllm.attention.backends.rocm_flash_attn import ROCmFlashAttentionMetadata
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.sequence import SequenceGroupMetadata
 from vllm.utils import get_kv_cache_torch_dtype
@@ -280,7 +281,7 @@ def lmcache_should_retrieve(
     :return: RetrieveStatus.
     """
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
+    assert isinstance(model_input.attn_metadata, (FlashAttentionMetadata, ROCmFlashAttentionMetadata)), \
         "Only FlashAttention backend is supported for now."
 
     # model_input doesn't have seq_lens in tp
