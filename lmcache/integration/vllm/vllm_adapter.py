@@ -351,7 +351,7 @@ def lmcache_should_store(
 
         return blend_metadata.processed_layer_count > 0
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
+    assert isinstance(model_input.attn_metadata, (FlashAttentionMetadata, ROCmFlashAttentionMetadata)), \
         "Only FlashAttention backend is supported for now."
 
     seq_lens = model_input.attn_metadata.seq_lens
@@ -455,7 +455,7 @@ def lmcache_store_kv(
     engine = LMCacheEngineBuilder.get(ENGINE_NAME)
     assert engine is not None, "LMCache engine is not initialized."
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
+    assert isinstance(model_input.attn_metadata, (FlashAttentionMetadata, ROCmFlashAttentionMetadata)), \
         "Only FlashAttention backend is supported for now."
 
     seq_lens = model_input.attn_metadata.seq_lens
@@ -618,7 +618,7 @@ def lmcache_retrieve_kv(
     if engine.config.enable_blending:
         return model_input, False
 
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
+    assert isinstance(model_input.attn_metadata, (FlashAttentionMetadata, ROCmFlashAttentionMetadata)), \
         "Only FlashAttention backend is supported for now."
 
     query_start_loc = model_input.attn_metadata.query_start_loc
@@ -800,7 +800,7 @@ def build_partial_prefill_input(
     """Helper function to rebuild the model input for the current request.
     """
     assert model_input.attn_metadata is not None
-    assert isinstance(model_input.attn_metadata, FlashAttentionMetadata), \
+    assert isinstance(model_input.attn_metadata, (FlashAttentionMetadata, ROCmFlashAttentionMetadata)), \
         "Only FlashAttention backend is supported for now."
     assert model_input.attn_metadata.context_lens_tensor is not None
     assert model_input.attn_metadata.block_tables is not None
