@@ -10,8 +10,8 @@ if torch.cuda.is_available() and torch.version.cuda:
 # Type definition
 KVCache = Tuple[Tuple[torch.Tensor, torch.Tensor], ...]
 
-def _is_hip():
-    return torch.cuda.is_available() and torch.version.hip
+def _is_cuda():
+    return torch.cuda.is_available() and torch.version.cuda
 
 @dataclass
 class DiskCacheMetadata:
@@ -79,7 +79,7 @@ def _get_color_for_nvtx(name):
 
 def _lmcache_nvtx_annotate(func, domain="lmcache"):
     """Decorator for applying nvtx annotations to methods in lmcache."""
-    if _is_hip():
+    if not _is_cuda():
         return func
 
     return annotate(
