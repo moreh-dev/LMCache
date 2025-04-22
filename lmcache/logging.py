@@ -10,5 +10,5 @@ logging.basicConfig(
 
 def init_logger(name: str) -> Logger:
     logger = logging.getLogger(name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     return logger
