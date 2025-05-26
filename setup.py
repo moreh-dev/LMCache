@@ -4,10 +4,17 @@ import torch
 from torch.utils import cpp_extension
 
 def _is_hip():
-    if torch.cuda.is_available() and torch.version.hip:
-        return True
-    else:
-        return False
+    return torch.cuda.is_available() and torch.version.hip
+
+def _hipify():
+    import subprocess
+    hipify_files = ["ac_dec.cu", "ac_enc.cu", "cachegen_kernels.cuh",
+        "cal_cdf.cu", "mem_kernels.cu",  "mem_kernels.cuh", "pybind.cpp"]
+    os.chdir("csrc")
+    subprocess.run(["rm", "-rf", "hip_output"])
+    subprocess.run(["mkdir", "hip_output"])
+    subprocess.run(["python", "hipify.py", "-p", ".", "-o", "hip_output"] + hipify_files)
+    os.chdir("..")
 
 installed_dependencies = [
     "torch >= 2.2.0",
@@ -38,6 +45,7 @@ sources = []
 include_dirs = []
 
 if _is_hip():
+    _hipify()
     rocm_home = os.environ.get('ROCM_HOME', '/opt/rocm')
     hip_include = os.path.join(rocm_home, 'include')
     hipcub_include = os.path.join(rocm_home, 'include/hipcub')
@@ -45,8 +53,8 @@ if _is_hip():
     extra_compile_args['hip'] = [
         f'-I{hip_include}', f'-I{hipcub_include}'
     ]
-    define_macros.append(('__HIP_PLATFORM_HCC__', '1'))
-    define_macros.append(('__HIP_PLATFORM_AMD__', '1'))
+    define_macros.append(('__HIP_PLATFORM_HCC__', '1')) # old version
+    define_macros.append(('__HIP_PLATFORM_AMD__', '1')) # new version
     sources.extend(['csrc/ac_dec.hip', 'csrc/ac_enc.hip',
                     'csrc/cachegen_kernels_hip.cuh', 'csrc/cal_cdf.hip',
                     'csrc/mem_kernels.hip', 'csrc/mem_kernels_hip.cuh',
