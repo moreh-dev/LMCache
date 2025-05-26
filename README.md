@@ -17,7 +17,6 @@ Try LMCache with pre-built vllm docker images [here](https://github.com/LMCache/
 
 # 💻 Quickstart
 
-## CUDA
 LMCache provides the integration to the latest vLLM (0.6.2). To install LMCache, use the following command:
 ```bash
 # requires python >= 3.10 and nvcc >= 12.1
@@ -63,25 +62,6 @@ LMCACHE_CONFIG_FILE=example.yaml CUDA_VISIBLE_DEVICES=1 lmcache_vllm serve lmsys
 We also provide multiple docker-based demos at [🔗LMCache-demos repo](https://github.com/LMCache/demo). The demos cover the following use cases:
 - Share KV caches across multiple serving engines [(🔗link)](https://github.com/LMCache/demo/tree/master/demo2-multi-node-sharing)
 - Loading non-prefix KV caches for RAG [(🔗link)](https://github.com/LMCache/demo/tree/master/demo3-KV-blending)
-
-## ROCM
-
-Prerequisite:
- - Installed vLLM 0.6.1.post2
- - Installed Pytorch 2.6.0+rocm6.2
- - Installed torchac_rocm [at https://github.com/moreh-dev/torchac_rocm.git]
-
- To install LMCache, use the following command:
- ```bash
- # requires python >= 3.10 and rocm >= 6.2
- $ export ROCM_HOME=<path to rocm> [in dev /opt/rocm-6.2.0]
- $ cd csrc
- $ ./hipify.sh
- $ cd ..
- $ PYTORCH_ROCM_ARCH=<HIP_ARCHITECTURE> python3 setup.py develop
- > # e.g. MI210 MI250
- > $ PYTORCH_ROCM_ARCH=gfx90a python3 setup.py develop
- ```
 
 # Interested in Connecting?
 Fill out the interest form and our team will reach out to you!

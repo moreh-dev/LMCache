@@ -17,7 +17,7 @@ def lmcache_get_config() -> Union[Config, ExperimentalConfig]:
     function will return the default configuration.
     """
 
-    if os.getenv("LMCACHE_USE_EXPERIMENTAL", default="True") == "True":
+    if os.getenv("LMCACHE_USE_EXPERIMENTAL") == "True":
         LMCacheEngineConfig = ExperimentalConfig  # type: ignore
     else:
         LMCacheEngineConfig = Config  # type: ignore
