@@ -6,14 +6,14 @@
 # -----------------------
 # default base image
 ARG COMMON_WORKDIR=/app
-ARG BASE_IMAGE="moreh-vllm:v0.9.0.0708"
+ARG BASE_IMAGE="192.168.212.30:1780/cache/moreh-vllm:v0.9.0.0708"
 ARG REMOTE_LMCACHE=0
 
 FROM ${BASE_IMAGE} AS base
 
 # Install some basic utilities
 RUN apt-get update -q -y && apt-get install -q -y \
-    wget perl linux-headers-5.15.0-25-generic \
+    wget perl linux-headers-5.15.0-25-generic libstdc++-12-dev \
     linux-modules-extra-5.15.0-25-generic tmux protobuf-compiler clang \
     libltdl-dev dkms ethtool quilt bison \
     libnl-route-3-dev pkg-config debhelper libnl-3-200 graphviz m4 libmnl0 libfuse2 \
@@ -58,7 +58,7 @@ FROM fetch_${REMOTE_LMCACHE} AS fetch_lmcache
 FROM fetch_lmcache AS build_lmcache
 ARG COMMON_WORKDIR
 
-RUN PYTORCH_ROCM_ARCH="gfx90a;gfx942" \
+RUN cd LMCache && PYTORCH_ROCM_ARCH="gfx90a;gfx942" \
     TORCH_DONT_CHECK_COMPILER_ABI=1 \
     CXX=hipcc \
     BUILD_WITH_HIP=1 \
