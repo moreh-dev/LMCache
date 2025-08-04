@@ -1,0 +1,51 @@
+# -----------------------
+# default base image
+ARG COMMON_WORKDIR=/app
+ARG BASE_IMAGE="python:3.12.11-slim-bullseye"
+
+FROM ${BASE_IMAGE} AS base
+
+# Install some basic utilities
+RUN apt-get update -q -y && apt-get install -q -y \
+    wget perl linux-headers-5.15.0-25-generic \
+    linux-modules-extra-5.15.0-25-generic tmux protobuf-compiler clang \
+    libltdl-dev dkms ethtool quilt bison \
+    libnl-route-3-dev pkg-config debhelper libnl-3-200 graphviz m4 libmnl0 libfuse2 \
+    autoconf lsof libnl-route-3-200 libusb-1.0-0 tk autotools-dev libnl-3-dev \
+    automake flex swig tcl chrpath
+
+ARG COMMON_WORKDIR
+WORKDIR ${COMMON_WORKDIR}
+
+# -----------------------
+# install OFED & UCX
+FROM base AS install_basic
+
+RUN wget http://www.mellanox.com/downloads/ofed/MLNX_OFED-24.10-2.1.8.0/MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64.tgz \
+    && tar -xzvf MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64.tgz \
+    && cd MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64 \
+    && ./mlnxofedinstall --without-fw-update --without-openmpi --without-ucx \
+       --with-nfsrdma --all -q --force --kernel 5.15.0-25-generic \
+    && cd .. && rm -rf MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64*
+
+RUN wget https://github.com/openucx/ucx/releases/download/v1.18.0/ucx-1.18.0.tar.gz \
+    && tar -xvf ucx-1.18.0.tar.gz \
+    && cd ucx-1.18.0 \
+    && ./configure --enable-shared --disable-static --disable-doxygen-doc \
+       --enable-optimizations --enable-devel-headers --enable-mt \
+       --with-rocm=/opt/rocm --with-mlx5 --prefix /usr/local\
+    && make -j && make install \
+    && cd .. && rm -rf ucx-1.18.0*
+
+# -----------------------
+# Final image
+FROM install_basic AS final
+
+# Install lmcache
+RUN pip install infinistore
+
+ARG COMMON_WORKDIR
+
+WORKDIR ${COMMON_WORKDIR}
+CMD ["/bin/bash"]
+
