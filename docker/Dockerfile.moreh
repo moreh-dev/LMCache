@@ -1,8 +1,3 @@
-# How to use
-# echo "GITHUB_TOKEN" > github_token.txt
-# docker build --secret id=github_token,src=github_token.txt \
-#              -f Dockerfile.moreh -t [image_name] .
-
 # -----------------------
 # default base image
 ARG COMMON_WORKDIR=/app
@@ -54,7 +49,7 @@ ONBUILD RUN git clone --branch ${LMCACHE_BRANCH} --single-branch "${LMCACHE_REPO
 FROM fetch_${REMOTE_LMCACHE} AS fetch_lmcache
 
 # ----------------------
-# build dynamo
+# build lmcache
 FROM fetch_lmcache AS build_lmcache
 ARG COMMON_WORKDIR
 
