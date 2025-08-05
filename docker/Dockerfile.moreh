@@ -71,6 +71,8 @@ FROM install_basic AS final
 RUN --mount=type=bind,from=export_build,src=/,target=/install \
     cd /install \
     && pip install *.whl
+# add mooncake for p2p sharing
+RUN pip install mooncake-transfer-engine
 
 ARG COMMON_WORKDIR
 
