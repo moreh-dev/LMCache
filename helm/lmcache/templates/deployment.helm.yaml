@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lmcache.fullname" . }}-deployment
+  labels:
+    {{- include "lmcache.labels" . | nindent 4 }}
+spec:
+  replicas: {{.Values.lmcache.replicas}}
+  selector:
+    matchLabels:
+      {{- include "lmcache.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      name: {{ include "lmcache.fullname" . }}-pod
+      labels:
+        {{- include "lmcache.labels" . | nindent 8 }}
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+{{ .Values.lmcache.nodeSelectorTerms | toYaml | indent 14 }}
+      tolerations:
+{{ .Values.lmcache.tolerations | toYaml | indent 8 }}
+      volumes:
+        - name: lmcache-config
+          configMap:
+            name: {{ include "lmcache.fullname" . }}-config
+      {{- if .Values.lmcache.imagePullSecrets }}
+      imagePullSecrets:
+{{ .Values.lmcache.imagePullSecrets | toYaml | indent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "lmcache.name" . }}-container
+          command:
+          {{- toYaml .Values.lmcache.command | nindent 12 }}
+          args:
+          {{- toYaml .Values.lmcache.args | nindent 12 }}
+          env:
+            - name: LMCACHE_USE_EXPERIMENTAL
+              value: "True"
+            - name: LMCACHE_CONFIG_FILE
+              value: "/app/configs/lmcache_config.yaml"
+            - name: VLLM_ROCM_USE_AITER
+              value: "0"
+{{ .Values.lmcache.env | toYaml | indent 12 }}
+          image: {{.Values.lmcache.image}}
+          imagePullPolicy: {{.Values.lmcache.imagePullPolicy}}
+          resources:
+{{ .Values.lmcache.resources | toYaml | indent 12 }}
+          workingDir: {{.Values.lmcache.workingDir}}
+          volumeMounts:
+            - name: lmcache-config
+              mountPath: /app/configs/lmcache_config.yaml
+              subPath: lmcache_config.yaml
+          {{- if .Values.lmcache.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ (default dict .Values.lmcache.port).targetPort | default 8000 }}
+          {{- end }}
