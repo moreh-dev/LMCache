@@ -7,7 +7,6 @@ fullnameOverride: ""
 
 lmcache:
   replicas: 1
-
   config: |
     # Basic configurations
     chunk_size: 256
@@ -25,32 +24,18 @@ lmcache:
   env:
     - name: HIP_VISIBLE_DEVICES
       value: "0"
-
   resources:
     limits:
-      cpu: 8
+      cpu: 32
       memory: 32Gi
       rdma/hca_shared_devices_a: "1"
       amd.com/gpu: "1"
     requests:
-      cpu: 8
+      cpu: 32
       memory: 32Gi
       rdma/hca_shared_devices_a: "1"
       amd.com/gpu: "1"
-    
-  nodeSelectorTerms: 
-    - matchExpressions:
-      - key: moreh.io/gpuType
-        operator: In
-        values:
-          - mi250
-      - key: moreh.io/purpose
-        operator: In
-        values:
-          - static
-            
   tolerations:
-    - key: node-role.kubernetes.io/compute
-      operator: Equal
-      value: "true"
+    - key: amd.com/gpu
+      operator: Exists
       effect: NoSchedule
