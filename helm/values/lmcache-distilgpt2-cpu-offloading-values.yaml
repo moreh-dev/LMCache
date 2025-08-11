@@ -1,4 +1,3 @@
-# Default values for lmcache.
 # This is a YAML-formatted file.
 
 # This is to override the chart name.
@@ -28,12 +27,12 @@ lmcache:
     limits:
       cpu: 32
       memory: 32Gi
-      rdma/hca_shared_devices_a: "1"
+      mellanox/hca: "1"
       amd.com/gpu: "1"
     requests:
       cpu: 32
       memory: 32Gi
-      rdma/hca_shared_devices_a: "1"
+      mellanox/hca: "1"
       amd.com/gpu: "1"
   tolerations:
     - key: amd.com/gpu
