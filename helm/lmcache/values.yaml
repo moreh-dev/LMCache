@@ -39,6 +39,8 @@ lmcache:
   nodeSelectorTerms: []
   # 톨러레이션 (tolerations)
   tolerations: []
+  # Security Context 설정
+  securityContext: {}
   # Pod의 레디니스 프로브 설정
   readinessProbe:
     enabled: true

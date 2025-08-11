@@ -6,4 +6,4 @@ metadata:
     {{- include "lmcache.labels" . | nindent 4 }}
 data:
   lmcache_config.yaml: |
-{{ .Values.lmcache.config | indent 4 }}
+    {{- .Values.lmcache.config | nindent 4 }}
