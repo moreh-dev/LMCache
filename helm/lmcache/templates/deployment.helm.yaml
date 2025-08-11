@@ -15,13 +15,17 @@ spec:
       labels:
         {{- include "lmcache.labels" . | nindent 8 }}
     spec:
+      {{- if .Values.lmcache.nodeSelectorTerms }}
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
 {{ .Values.lmcache.nodeSelectorTerms | toYaml | indent 14 }}
+      {{- end }}
+      {{- if .Values.lmcache.tolerations }}
       tolerations:
 {{ .Values.lmcache.tolerations | toYaml | indent 8 }}
+      {{- end }}
       volumes:
         - name: lmcache-config
           configMap:
