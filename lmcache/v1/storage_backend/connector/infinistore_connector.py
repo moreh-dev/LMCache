@@ -18,6 +18,7 @@ from typing import List, Optional, Union, no_type_check
 import asyncio
 import ctypes
 import operator
+import socket
 
 # Third Party
 import infinistore
@@ -55,7 +56,7 @@ class InfinistoreConnector(RemoteConnector):
         memory_allocator: LocalCPUBackend,
     ):
         config = infinistore.ClientConfig(
-            host_addr=host,
+            host_addr=socket.gethostbyname(host),
             service_port=port,
             log_level="info",
             connection_type=infinistore.TYPE_RDMA,
