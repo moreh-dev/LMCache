@@ -5,7 +5,6 @@ metadata:
   labels:
     {{- include "infinistore.labels" . | nindent 4 }}
 spec:
-  clusterIP: None
   selector:
     {{- include "infinistore.selectorLabels" . | nindent 4 }}
   ports:
