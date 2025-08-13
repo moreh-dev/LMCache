@@ -31,9 +31,7 @@ infinistore:
   # 리소스 할당 (CPU, 메모리, GPU 등)
   resources: {}
   # Service 포트 설정
-  servicePort:
-    port: 22345
-    targetPort: 22345
+  servicePort: 22345
   managePort: 18080
   # 노드 어피니티 (nodeAffinity)
   nodeSelectorTerms: []

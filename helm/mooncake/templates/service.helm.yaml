@@ -9,8 +9,8 @@ spec:
     {{- include "mooncake.selectorLabels" (tuple . "master") | nindent 4 }}
   ports:
     - name: general
-      port: {{ (default dict .Values.mooncake.master.port).port }}
-      targetPort: {{ (default dict .Values.mooncake.master.port).targetPort }}
+      port: 80
+      targetPort: {{ .Values.mooncake.master.port }}
 ---
 apiVersion: v1
 kind: Service
@@ -23,5 +23,5 @@ spec:
     {{- include "mooncake.selectorLabels" (tuple . "meta") | nindent 4 }}
   ports:
     - name: general
-      port: {{ (default dict .Values.mooncake.meta.port).port }}
-      targetPort: {{ (default dict .Values.mooncake.meta.port).targetPort }}
+      port: 80
+      targetPort: {{ .Values.mooncake.meta.port }}

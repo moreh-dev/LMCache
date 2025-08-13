@@ -32,9 +32,7 @@ lmcache:
   # 리소스 할당 (CPU, 메모리, GPU 등)
   resources: {}
   # Service 포트 설정
-  port:
-    port: 8000
-    targetPort: 8000
+  port: 8000
   # 노드 어피니티 (nodeAffinity)
   nodeSelectorTerms: []
   # 톨러레이션 (tolerations)

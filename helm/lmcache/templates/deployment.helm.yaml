@@ -65,5 +65,5 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: {{ (default dict .Values.lmcache.port).targetPort | default 8000 }}
+              port: {{ .Values.lmcache.port }}
           {{- end }}
