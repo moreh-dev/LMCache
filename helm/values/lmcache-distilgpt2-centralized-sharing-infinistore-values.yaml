@@ -9,7 +9,6 @@ lmcache:
   config: |
     chunk_size: 256
     local_cpu: false
-    # Infinistore podIP
     remote_url: "infinistore://infinistore-infini-test-statefulset-0.infinistore-infini-test-service:12345?device=mlx5_0"
     remote_serde: "naive"
     extra_config:
