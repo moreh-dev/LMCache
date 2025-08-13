@@ -14,9 +14,7 @@ mooncake:
     args: 
       - |
         mooncake_master -v=1 -port=50051
-    port:
-      port: 50051
-      targetPort: 50051
+    port: 50051
     resources:
       limits:
         cpu: 16
@@ -32,9 +30,7 @@ mooncake:
     args: 
       - |
         mooncake_http_metadata_server --port 8080
-    port:
-      port: 8080
-      targetPort: 8080
+    port: 8080
     resources:
       limits:
         cpu: 16

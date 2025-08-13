@@ -20,7 +20,8 @@ create inference with infinistore lmcache
   - change `--link-type` at `infinistore.Value.arg`
   - change `infinistore_link_type` at `lmcache.Value.lmcache.config`
 - change `remote_url` at `lmcache.Value.lmcache.config`
-  - `remote_url: infinistore://[pod name].[service name]?device=[device name]`
+  - `remote_url: infinistore://[pod name].[service name]:[service port]?device=[device name]`
+    - `service port` must be included
 
 ```
 # start infinistore lmcache
@@ -33,7 +34,8 @@ helm install [lmcache name] ./lmcache -f values/lmcache-distilgpt2-centralized-s
 ## LMCache with P2P Sharing [ w. mooncake ]
 create inference with mooncake lmcache
 - change urls at `lmcache.Value.lmcache.config`
-  - `remote_url: mooncakestore://[master service url]/`
+  - `remote_url: mooncakestore://[master service url]:[master service port]/`
+    - `service port` must be included
   - `metadata_server: "http://[meta service url]"`
   - `master_server_address: "[master service url]"`
 

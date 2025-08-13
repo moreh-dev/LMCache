@@ -52,7 +52,7 @@ spec:
           {{- if .Values.mooncake.master.readinessProbe.enabled }}
           readinessProbe:
             tcpSocket:
-              port: {{ (default dict .Values.mooncake.master.port).port }}
+              port: {{ .Values.mooncake.master.port }}
           {{- end }}
 ---
 apiVersion: apps/v1
@@ -109,5 +109,5 @@ spec:
           {{- if .Values.mooncake.meta.readinessProbe.enabled }}
           readinessProbe:
             tcpSocket:
-              port: {{ (default dict .Values.mooncake.meta.port).port }}
+              port: {{ .Values.mooncake.meta.port }}
           {{- end }}

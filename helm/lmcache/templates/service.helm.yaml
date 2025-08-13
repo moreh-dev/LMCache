@@ -9,5 +9,5 @@ spec:
    {{- include "lmcache.selectorLabels" . | nindent 4 }}
   ports:
     - name: general
-      port: {{ (default dict .Values.lmcache.port).port }}
-      targetPort: {{ (default dict .Values.lmcache.port).targetPort }}
+      port: 80
+      targetPort: {{ .Values.lmcache.port }}

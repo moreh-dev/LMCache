@@ -31,10 +31,8 @@ mooncake:
       #   value: "some-value"
     # 리소스 할당 (CPU, 메모리, GPU 등)
     resources: {}
-      # Service 포트 설정
-    port:
-      port: 50051
-      targetPort: 50051
+    # Service 포트 설정
+    port: 50051
     # 노드 어피니티 (nodeAffinity)
     nodeSelectorTerms: []        
     # 톨러레이션 (tolerations)
@@ -59,10 +57,8 @@ mooncake:
       #   value: "some-value"
     # 리소스 할당 (CPU, 메모리, GPU 등)
     resources: {}
-      # Service 포트 설정
-    port:
-      port: 8080
-      targetPort: 8080
+    # Service 포트 설정
+    port: 8080
     # 노드 어피니티 (nodeAffinity)
     nodeSelectorTerms: []        
     # 톨러레이션 (tolerations)
