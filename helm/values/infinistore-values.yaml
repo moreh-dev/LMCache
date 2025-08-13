@@ -1,0 +1,32 @@
+# This is a YAML-formatted file.
+
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+infinistore:
+  image: "192.168.212.30:1780/moreh/infinistore:v0.2.35-moreh_0805"
+  replicas: 1
+  command:
+    - /bin/bash
+    - -lc
+  args: 
+    - |
+      infinistore --service-port 12345 --manage-port 18080 --dev-name mlx5_0 --link-type IB
+  servicePort:
+    port: 12345
+    targetPort: 12345
+  managePort: 18080
+  resources:
+    limits:
+      cpu: 16
+      memory: 32Gi
+      mellanox/hca: "1"
+    requests:
+      cpu: 16
+      memory: 32Gi
+      mellanox/hca: "1"
+  securityContext:
+    capabilities:
+      add:
+        - "SYS_RESOURCE"
