@@ -1,0 +1,46 @@
+# Default values for lmcache.
+# This is a YAML-formatted file.
+
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------
+# infinistore 관련 설정
+# -----------------------------------------------------------
+infinistore:
+  # Pod의 복제본 수
+  replicas: 1
+  # Pod에 사용할 컨테이너 이미지
+  image: ""
+  imagePullPolicy: "Always"
+  imagePullSecrets: []
+    # - name: my-secret-name # 개인 컨테이너 레지스트리에서 이미지를 가져올 때 사용
+  # 작업 디렉토리
+  workingDir: "/app"
+  # 컨테이너 시작 시 실행될 명령어
+  command: []
+  # 명령어에 전달될 인수 (위 command와 함께 사용됨)
+  args: []
+    # --link-type [ IB |  Ethernet ]
+  # 환경 변수 (env)
+  env: []
+    # 추가 환경 변수를 여기에 정의하세요.
+    # - name: EXTRA_ENV_VAR
+    #   value: "some-value"
+  # 리소스 할당 (CPU, 메모리, GPU 등)
+  resources: {}
+  # Service 포트 설정
+  servicePort:
+    port: 22345
+    targetPort: 22345
+  managePort: 18080
+  # 노드 어피니티 (nodeAffinity)
+  nodeSelectorTerms: []
+  # 톨러레이션 (tolerations)
+  tolerations: []
+  # Security Context 설정
+  securityContext: {}
+  # Pod의 레디니스 프로브 설정
+  readinessProbe:
+    enabled: true
