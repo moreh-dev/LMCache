@@ -13,7 +13,7 @@ lmcache:
     local_cpu: true
     max_local_cpu_size: 5.0  # 5GB CPU memory limit
 
-  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_mooncake_0805"
+  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_mooncake_0812"
   command:
     - /bin/bash
     - -lc
