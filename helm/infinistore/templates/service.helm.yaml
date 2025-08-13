@@ -10,5 +10,5 @@ spec:
     {{- include "infinistore.selectorLabels" . | nindent 4 }}
   ports:
     - name: general
-      port: {{ (default dict .Values.infinistore.servicePort).port }}
-      targetPort: {{ (default dict .Values.infinistore.servicePort).targetPort }}
+      port: {{ .Values.infinistore.servicePort }}
+      targetPort: {{ .Values.infinistore.servicePort }}

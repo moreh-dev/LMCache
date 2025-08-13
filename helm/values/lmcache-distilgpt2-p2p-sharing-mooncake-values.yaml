@@ -9,16 +9,16 @@ lmcache:
   config: |
     chunk_size: 256
     local_device: "cpu"
-    remote_url: "mooncakestore://mooncake-moon-test-master-service:50051/"
+    remote_url: "mooncakestore://mooncake-moon-test-master-service:80/"
     remote_serde: "naive"
     local_cpu: False
     max_local_cpu_size: 5
     extra_config:
       local_hostname: "localhost"
-      metadata_server: "http://mooncake-moon-test-meta-service:8080/metadata"
+      metadata_server: "http://mooncake-moon-test-meta-service/metadata"
       protocol: "rdma"
       device_name: "mlx5_0"
-      master_server_address: "mooncake-moon-test-master-service:50051"
+      master_server_address: "mooncake-moon-test-master-service"
       global_segment_size: 3355443200
       local_buffer_size: 1073741824
       transfer_timeout: 1

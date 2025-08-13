@@ -13,9 +13,7 @@ infinistore:
   args: 
     - |
       infinistore --service-port 12345 --manage-port 18080 --dev-name mlx5_0 --link-type IB
-  servicePort:
-    port: 12345
-    targetPort: 12345
+  servicePort: 12345
   managePort: 18080
   resources:
     limits:
