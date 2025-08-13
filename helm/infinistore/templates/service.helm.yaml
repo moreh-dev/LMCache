@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "infinistore.fullname" . }}-service
+  labels:
+    {{- include "infinistore.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    {{- include "infinistore.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: general
+      port: {{ (default dict .Values.infinistore.servicePort).port }}
+      targetPort: {{ (default dict .Values.infinistore.servicePort).targetPort }}
