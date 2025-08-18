@@ -1,0 +1,50 @@
+# This is a YAML-formatted file.
+
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+lmcache:
+  replicas: 2
+  config: |
+    chunk_size: 256
+    local_device: "cpu"
+    remote_url: "mooncakestore://mooncake-moon-test-master-service:80/"
+    remote_serde: "naive"
+    local_cpu: False
+    max_local_cpu_size: 5
+    extra_config:
+      local_hostname: "localhost"
+      metadata_server: "http://mooncake-moon-test-meta-service/metadata"
+      protocol: "rdma"
+      device_name: "mlx5_0"
+      master_server_address: "mooncake-moon-test-master-service"
+      global_segment_size: 3355443200
+      local_buffer_size: 1073741824
+      transfer_timeout: 1
+
+  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_mooncake_0812"
+  command:
+    - /bin/bash
+    - -lc
+  args: 
+    - |
+      vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
+  env:
+    - name: HIP_VISIBLE_DEVICES
+      value: "0"
+  resources:
+    limits:
+      cpu: 32
+      memory: 32Gi
+      mellanox/hca: "1"
+      amd.com/gpu: "1"
+    requests:
+      cpu: 32
+      memory: 32Gi
+      mellanox/hca: "1"
+      amd.com/gpu: "1"
+  tolerations:
+    - key: amd.com/gpu
+      operator: Exists
+      effect: NoSchedule

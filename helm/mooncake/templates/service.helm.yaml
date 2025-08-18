@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mooncake.fullname" . }}-master-service
+  labels:
+    {{- include "mooncake.labels" (tuple . "master") | nindent 4 }}
+spec:
+  selector:
+    {{- include "mooncake.selectorLabels" (tuple . "master") | nindent 4 }}
+  ports:
+    - name: general
+      port: 80
+      targetPort: {{ .Values.mooncake.master.port }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mooncake.fullname" . }}-meta-service
+  labels:
+      {{- include "mooncake.labels" (tuple . "meta") | nindent 4 }}
+spec:
+  selector:
+    {{- include "mooncake.selectorLabels" (tuple . "meta") | nindent 4 }}
+  ports:
+    - name: general
+      port: 80
+      targetPort: {{ .Values.mooncake.meta.port }}
