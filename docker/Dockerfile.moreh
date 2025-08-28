@@ -13,7 +13,8 @@ RUN apt-get update -q -y && apt-get install -q -y \
     libltdl-dev dkms ethtool quilt bison \
     libnl-route-3-dev pkg-config debhelper libnl-3-200 graphviz m4 libmnl0 libfuse2 \
     autoconf lsof libnl-route-3-200 libusb-1.0-0 tk autotools-dev libnl-3-dev \
-    automake flex swig tcl chrpath
+    automake flex swig tcl chrpath && \
+    rm -rf /var/lib/apt/lists/*
 
 ARG COMMON_WORKDIR
 WORKDIR ${COMMON_WORKDIR}
@@ -44,7 +45,7 @@ FROM base AS fetch_0
 ONBUILD COPY ./ LMCache/
 FROM base AS fetch_1
 ARG LMCACHE_REPO="https://github.com/LMCache/LMCache.git"
-ARG LMCACHE_BRANCH="v0.3.2"
+ARG LMCACHE_BRANCH="v0.3.3"
 ONBUILD RUN git clone --branch ${LMCACHE_BRANCH} --single-branch "${LMCACHE_REPO}"
 FROM fetch_${REMOTE_LMCACHE} AS fetch_lmcache
 
@@ -76,6 +77,7 @@ RUN pip install mooncake-transfer-engine
 
 ARG COMMON_WORKDIR
 
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib/python3.12/dist-packages/torch/lib
 WORKDIR ${COMMON_WORKDIR}
 CMD ["/bin/bash"]
 
