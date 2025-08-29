@@ -8,14 +8,15 @@ lmcache:
   replicas: 2
   config: |
     chunk_size: 256
-    local_cpu: false
+    local_cpu: true
+    max_local_cpu_size: 5.0  # 5GB CPU memory limit
     remote_url: "infinistore://infinistore-infini-test-service:12345?device=mlx5_0"
     remote_serde: "naive"
     extra_config:
       # LINK_ETHERNET for Ethernet, LINK_IB for InfiniBand
       infinistore_link_type: "LINK_IB" 
 
-  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_mooncake_0812"
+  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.3_mooncake_0827"
   command:
     - /bin/bash
     - -lc
@@ -24,6 +25,8 @@ lmcache:
       vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
   env:
     - name: HIP_VISIBLE_DEVICES
+      value: "0"
+    - name: PYTHONHASHSEED
       value: "0"
   resources:
     limits:
