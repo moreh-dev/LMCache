@@ -1,3 +1,8 @@
+# How to use
+# echo "GITHUB_TOKEN" > github_token.txt
+# docker build --secret id=github_token,src=github_token.txt \
+#              -f Dockerfile.moreh -t [image_name] .
+
 # -----------------------
 # default base image
 ARG COMMON_WORKDIR=/app
@@ -45,7 +50,7 @@ FROM base AS fetch_0
 ONBUILD COPY ./ LMCache/
 FROM base AS fetch_1
 ARG LMCACHE_REPO="https://github.com/LMCache/LMCache.git"
-ARG LMCACHE_BRANCH="v0.3.3"
+ARG LMCACHE_BRANCH="v0.3.6"
 ONBUILD RUN git clone --branch ${LMCACHE_BRANCH} --single-branch "${LMCACHE_REPO}"
 FROM fetch_${REMOTE_LMCACHE} AS fetch_lmcache
 
@@ -60,9 +65,21 @@ RUN cd LMCache && PYTORCH_ROCM_ARCH="gfx90a;gfx942" \
     BUILD_WITH_HIP=1 \
     python3 setup.py bdist_wheel --dist-dir=dist
 
+# -----------------------
+#  build nixl
+FROM base AS build_nixl
+ARG COMMON_WORKDIR
+ARG NIXL_REPO="github.com/moreh-dev/nixl.git"
+
+RUN --mount=type=secret,id=github_token \
+    GITHUB_TOKEN=$(cat /run/secrets/github_token) \
+    && git clone --branch "0.3.0-rocm" --single-branch "https://${GITHUB_TOKEN}@${NIXL_REPO}" \
+    && cd nixl && echo "$PATH" && python -m build --wheel
+
 FROM scratch AS export_build
 ARG COMMON_WORKDIR
 COPY --from=build_lmcache   ${COMMON_WORKDIR}/LMCache/dist/*.whl /
+COPY --from=build_nixl      ${COMMON_WORKDIR}/nixl/dist/*.whl /
 
 # -----------------------
 # Final image
@@ -72,8 +89,8 @@ FROM install_basic AS final
 RUN --mount=type=bind,from=export_build,src=/,target=/install \
     cd /install \
     && pip install *.whl
-# add mooncake for p2p sharing
-RUN pip install mooncake-transfer-engine
+# add mooncake, infinistore for sharing
+RUN pip install mooncake-transfer-engine infinistore
 
 ARG COMMON_WORKDIR
 
