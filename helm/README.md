@@ -33,6 +33,8 @@ helm install [lmcache name] ./lmcache -f values/lmcache-distilgpt2-centralized-s
 
 ## LMCache with P2P Sharing [ w. mooncake ]
 create inference with mooncake lmcache
+- change urls at `mooncake.args`
+  - `etcd_endpoints: [etcd service url]:[etcd service port]`
 - change urls at `lmcache.Value.lmcache.config`
   - `remote_url: mooncakestore://[master service url]:[master service port]/`
     - `service port` must be included
@@ -40,6 +42,11 @@ create inference with mooncake lmcache
   - `master_server_address: "[master service url]"`
 
 ```
+# start etcd for master ha
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+helm install [etcd name] bitnami/etcd -f values/etcd-values.yaml
+
 # start mooncake meta & master
 helm install [mooncake name] ./mooncake -f values/mooncake-values.yaml -n [namespace]
 

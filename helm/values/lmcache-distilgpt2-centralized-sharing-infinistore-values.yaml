@@ -16,7 +16,7 @@ lmcache:
       # LINK_ETHERNET for Ethernet, LINK_IB for InfiniBand
       infinistore_link_type: "LINK_IB" 
 
-  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.3_mooncake_0827"
+  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
   command:
     - /bin/bash
     - -lc
