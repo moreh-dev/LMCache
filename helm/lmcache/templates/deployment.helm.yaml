@@ -63,7 +63,7 @@ spec:
             - name: lmcache-config
               mountPath: /app/configs/lmcache_config.yaml
               subPath: lmcache_config.yaml
-          {{- if ( default true .readinessProbe ) }}
+          {{- if (ne .readinessProbe false) }}
           readinessProbe:
             httpGet:
               path: /health
