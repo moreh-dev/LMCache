@@ -10,9 +10,9 @@ infinistore:
   command:
     - /bin/bash
     - -lc
-  args: 
+  args:
     - |
-      infinistore --service-port 12345 --manage-port 18080 --dev-name mlx5_0 --link-type IB
+      infinistore --service-port 12345 --manage-port 18080 --dev-name mlx5_0 --link-type IB --log-level debug
   servicePort: 12345
   managePort: 18080
   resources:
