@@ -1,9 +1,12 @@
+{{- range .Values.lmcache.deployList }}
+{{- if ( default false .serviceMonitor ) }}
+---
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "lmcache.fullname" . }}-servicemonitor
+  name: {{ include "lmcache.fullname" $ }}-{{ .name | default "lmcache" }}-servicemonitor
   labels:
-    {{- include "lmcache.labels" . | nindent 4 }}
+    {{- include "lmcache.labels" (merge (dict "subname" .name | default "lmcache") $) | nindent 4 }}
 spec:
   endpoints:
     - honorLabels: false
@@ -12,7 +15,9 @@ spec:
       port: general
   namespaceSelector:
     matchNames:
-      - {{.Release.Namespace}}
+      - {{ $.Release.Namespace }}
   selector:
     matchLabels:
-      {{- include "lmcache.selectorLabels" . | nindent 6 }}
+      {{- include "lmcache.selectorLabels" (merge (dict "subname" .name | default "lmcache") $) | nindent 6 }}
+{{- end }}
+{{- end }}
