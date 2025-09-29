@@ -5,7 +5,6 @@ nameOverride: ""
 fullnameOverride: ""
 
 lmcache:
-  replicas: 1
   config: |
     # Basic configurations
     chunk_size: 256
@@ -13,28 +12,31 @@ lmcache:
     local_cpu: true
     max_local_cpu_size: 5.0  # 5GB CPU memory limit
 
-  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
-  command:
-    - /bin/bash
-    - -lc
-  args: 
-    - |
-      vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
-  env:
-    - name: HIP_VISIBLE_DEVICES
-      value: "0"
-  resources:
-    limits:
-      cpu: 32
-      memory: 32Gi
-      mellanox/hca: "1"
-      amd.com/gpu: "1"
-    requests:
-      cpu: 32
-      memory: 32Gi
-      mellanox/hca: "1"
-      amd.com/gpu: "1"
-  tolerations:
-    - key: amd.com/gpu
-      operator: Exists
-      effect: NoSchedule
+  deployList:
+    - name: "cpu"
+      replicas: 1
+      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
+      command:
+        - /bin/bash
+        - -lc
+      args:
+        - |
+          vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
+      env:
+        - name: HIP_VISIBLE_DEVICES
+          value: "0"
+      resources:
+        limits:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+        requests:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
