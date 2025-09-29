@@ -44,7 +44,6 @@ lmcache:
         - key: amd.com/gpu
           operator: Exists
           effect: NoSchedule
-      # readinessProbe: false
     - name: "prefill"
       replicas: 1
       image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
@@ -79,7 +78,6 @@ lmcache:
         - key: amd.com/gpu
           operator: Exists
           effect: NoSchedule
-      # readinessProbe: false
     - name: "decode"
       replicas: 1
       image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
