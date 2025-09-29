@@ -1,0 +1,116 @@
+# This is a YAML-formatted file.
+
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+lmcache:
+  config: |
+    chunk_size: 256
+    local_cpu: true
+    max_local_cpu_size: 5.0  # 5GB CPU memory limit
+    remote_url: "infinistore://infinistore-infini-test-service:12345?device=mlx5_0"
+    remote_serde: "naive"
+    extra_config:
+      # LINK_ETHERNET for Ethernet, LINK_IB for InfiniBand
+      infinistore_link_type: "LINK_IB"
+  deployList:
+    - name: "lmcache"
+      replicas: 1
+      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
+      command:
+        - /bin/bash
+        - -lc
+      args:
+        - |
+          vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
+      env:
+        - name: HIP_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONHASHSEED
+          value: "0"
+      resources:
+        limits:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+        requests:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      # readinessProbe: false
+    - name: "prefill"
+      replicas: 1
+      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
+      command:
+        - /bin/bash
+        - -lc
+      args:
+        - |
+          vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" \
+          --kv-transfer-config '{"kv_connector":"MultiConnector", "kv_role":"kv_both", "kv_connector_extra_config":{"connectors":[{"kv_connector": "LMCacheConnectorV1", "kv_role": "kv_both"},{"kv_connector": "NixlConnector", "kv_role": "kv_both"}]}}'
+      env:
+        - name: HIP_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONHASHSEED
+          value: "0"
+        - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      resources:
+        limits:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+        requests:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      # readinessProbe: false
+    - name: "decode"
+      replicas: 1
+      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
+      command:
+        - /bin/bash
+        - -lc
+      args:
+        - |
+          vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" \
+          --kv-transfer-config '{"kv_connector":"MultiConnector", "kv_role":"kv_both", "kv_connector_extra_config":{"connectors":[{"kv_connector": "NixlConnector", "kv_role": "kv_both"},{"kv_connector": "LMCacheConnectorV1", "kv_role": "kv_both"}]}}'
+      env:
+        - name: HIP_VISIBLE_DEVICES
+          value: "0"
+        - name: PYTHONHASHSEED
+          value: "0"
+        - name: VLLM_CONFIGURE_LOGGING
+          value: "1"
+        - name: VLLM_LOGGING_LEVEL
+          value: "DEBUG"
+      resources:
+        limits:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+        requests:
+          cpu: 32
+          memory: 32Gi
+          mellanox/hca: "1"
+          amd.com/gpu: "1"
+      tolerations:
+        - key: amd.com/gpu
+          operator: Exists
+          effect: NoSchedule
