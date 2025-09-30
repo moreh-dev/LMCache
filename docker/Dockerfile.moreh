@@ -49,7 +49,7 @@ FROM base AS fetch_0
 ONBUILD COPY ./ LMCache/
 FROM base AS fetch_1
 ARG LMCACHE_REPO="https://github.com/LMCache/LMCache.git"
-ARG LMCACHE_BRANCH="v0.3.6"
+ARG LMCACHE_BRANCH="v0.3.7"
 ONBUILD RUN git clone --branch ${LMCACHE_BRANCH} --single-branch "${LMCACHE_REPO}"
 FROM fetch_${REMOTE_LMCACHE} AS fetch_lmcache
 
