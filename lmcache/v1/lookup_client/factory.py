@@ -1,17 +1,4 @@
-# Copyright 2024-2025 LMCache Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+# SPDX-License-Identifier: Apache-2.0
 # Standard
 from typing import TYPE_CHECKING, Optional
 
@@ -19,13 +6,13 @@ from typing import TYPE_CHECKING, Optional
 from lmcache.integration.vllm.utils import lmcache_get_config
 from lmcache.logging import init_logger
 from lmcache.v1.cache_engine import LMCacheEngine
+from lmcache.v1.config import LMCacheEngineConfig
 from lmcache.v1.lookup_client.abstract_client import LookupClientInterface
 from lmcache.v1.lookup_client.mooncake_lookup_client import MooncakeLookupClient
 
 if TYPE_CHECKING:
     # Third Party
     from vllm.config import VllmConfig
-    from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorRole
 
     # First Party
     from lmcache.v1.lookup_client.lmcache_lookup_client import LMCacheLookupServer
@@ -38,27 +25,24 @@ class LookupClientFactory:
 
     @staticmethod
     def create_lookup_client(
-        role: "KVConnectorRole",
-        is_tp: bool,
         vllm_config: "VllmConfig",
+        config: LMCacheEngineConfig,
     ) -> LookupClientInterface:
         """
         Create a lookup client based on the configuration.
 
         Args:
-            role: The KV connector role
-            is_tp: Whether tensor parallelism is enabled
             vllm_config: The vLLM configuration
+            config: The LMCache engine configuration
 
         Returns:
             A lookup client instance
         """
-        config = lmcache_get_config()
 
         # Check if external_lookup_client is configured
         if config.external_lookup_client is not None:
             return LookupClientFactory._create_external_lookup_client(
-                config.external_lookup_client, role, is_tp, vllm_config
+                config.external_lookup_client, vllm_config
             )
         else:
             # First Party
@@ -66,13 +50,11 @@ class LookupClientFactory:
                 LMCacheLookupClient,
             )
 
-            return LMCacheLookupClient(role, is_tp, vllm_config)
+            return LMCacheLookupClient(vllm_config, config)
 
     @staticmethod
     def create_lookup_server(
         lmcache_engine: LMCacheEngine,
-        role: "KVConnectorRole",
-        is_tp: bool,
         vllm_config: "VllmConfig",
     ) -> Optional["LMCacheLookupServer"]:
         """
@@ -80,8 +62,6 @@ class LookupClientFactory:
 
         Args:
             lmcache_engine: The LMCache engine instance
-            role: The KV connector role
-            is_tp: Whether tensor parallelism is enabled
             vllm_config: The vLLM configuration
 
         Returns:
@@ -91,24 +71,26 @@ class LookupClientFactory:
 
         # Only create the KV lookup API server on worker rank 0
         # when there are multiple workers and when not using external lookup client
-        if (
-            vllm_config.parallel_config.rank == 0
-            and config.external_lookup_client is None
+        create_lookup_server_only_on_worker_0 = (
+            config.extra_config
+            and config.extra_config.get("create_lookup_server_only_on_worker_0", True)
+        )
+        if config.external_lookup_client is None and (
+            not create_lookup_server_only_on_worker_0
+            or lmcache_engine.metadata.worker_id == 0
         ):
             # First Party
             from lmcache.v1.lookup_client.lmcache_lookup_client import (
                 LMCacheLookupServer,
             )
 
-            return LMCacheLookupServer(lmcache_engine, role, is_tp, vllm_config)
+            return LMCacheLookupServer(lmcache_engine, vllm_config)
 
         return None
 
     @staticmethod
     def _create_external_lookup_client(
         external_lookup_uri: str,
-        role: "KVConnectorRole",
-        is_tp: bool,
         vllm_config: "VllmConfig",
     ) -> LookupClientInterface:
         """
@@ -116,8 +98,6 @@ class LookupClientFactory:
 
         Args:
             external_lookup_uri: URI in format <scheme>://<address>
-            role: The KV connector role
-            is_tp: Whether tensor parallelism is enabled
             vllm_config: The vLLM configuration
 
         Returns:
@@ -138,7 +118,7 @@ class LookupClientFactory:
         # Route to appropriate client based on scheme
         if scheme == "mooncakestore":
             return LookupClientFactory._create_mooncake_lookup_client(
-                address, role, is_tp, vllm_config
+                address, vllm_config
             )
         else:
             raise ValueError(
@@ -149,8 +129,6 @@ class LookupClientFactory:
     @staticmethod
     def _create_mooncake_lookup_client(
         master_address: str,
-        role: "KVConnectorRole",
-        is_tp: bool,
         vllm_config: "VllmConfig",
     ) -> "MooncakeLookupClient":
         """Create a MooncakeLookupClient instance."""
@@ -159,4 +137,4 @@ class LookupClientFactory:
             MooncakeLookupClient,
         )
 
-        return MooncakeLookupClient(role, is_tp, vllm_config, master_address)
+        return MooncakeLookupClient(vllm_config, master_address)

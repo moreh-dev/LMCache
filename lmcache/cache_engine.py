@@ -1,17 +1,4 @@
-# Copyright 2024-2025 LMCache Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+# SPDX-License-Identifier: Apache-2.0
 # Standard
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 import logging
@@ -19,7 +6,6 @@ import time
 
 # Third Party
 import torch
-import xxhash
 
 # First Party
 from lmcache.config import LMCacheEngineConfig, LMCacheEngineMetadata
@@ -64,7 +50,7 @@ class LMCacheEngine:
             self.metadata.model_name,
             self.metadata.world_size,
             self.metadata.worker_id,
-            chunk_hash,
+            int(chunk_hash),
         )
 
     def _num_tokens_in_kv(
@@ -77,18 +63,15 @@ class LMCacheEngine:
         else:
             raise ValueError(f"Invalid format: {fmt}")
 
-    def _get_init_hash(self) -> str:
-        return ""
+    def _get_init_hash(self) -> int:
+        return hash(None)
 
     def _hash(
         self,
         tokens: torch.Tensor,
-        prefix_hash: str,
+        prefix_hash: int,
     ) -> str:
-        hasher = xxhash.xxh64()
-        hasher.update(prefix_hash.encode("ascii"))
-        hasher.update(tokens.numpy().tobytes())
-        return hasher.hexdigest()
+        return hash((prefix_hash, tuple(tokens.tolist())))
 
     def _chunk_tokens(
         self,

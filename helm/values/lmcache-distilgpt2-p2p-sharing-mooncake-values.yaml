@@ -23,7 +23,7 @@ lmcache:
       local_buffer_size: 1073741824
       transfer_timeout: 1
 
-  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_mooncake_0812"
+  image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.3_mooncake_0827"
   command:
     - /bin/bash
     - -lc
@@ -32,6 +32,8 @@ lmcache:
       vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
   env:
     - name: HIP_VISIBLE_DEVICES
+      value: "0"
+    - name: PYTHONHASHSEED
       value: "0"
   resources:
     limits:
