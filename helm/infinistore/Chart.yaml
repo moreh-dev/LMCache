@@ -1,6 +1,6 @@
 apiVersion: v2
 name: infinistore
-description: A Helm chart for Kubernetes
+description: A Helm chart for infinistore at k8s
 
 # A chart can be either an 'application' or a 'library' chart.
 #

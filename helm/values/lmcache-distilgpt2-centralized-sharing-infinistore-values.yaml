@@ -13,16 +13,16 @@ lmcache:
     remote_serde: "naive"
     extra_config:
       # LINK_ETHERNET for Ethernet, LINK_IB for InfiniBand
-      infinistore_link_type: "LINK_IB" 
+      infinistore_link_type: "LINK_IB"
 
   deployList:
     - name: "infinistore"
       replicas: 2
-      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0923"
+      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.6_nixl_0925"
       command:
         - /bin/bash
         - -lc
-      args: 
+      args:
         - |
           vllm serve distilbert/distilgpt2 --max-model-len "1024" --tensor-parallel-size "1" --kv-transfer-config '{"kv_connector":"LMCacheConnectorV1", "kv_role":"kv_both"}'
       env:
