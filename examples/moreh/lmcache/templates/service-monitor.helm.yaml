@@ -6,7 +6,7 @@ kind: ServiceMonitor
 metadata:
   name: {{ include "lmcache.fullname" $ }}-{{ .name | default "lmcache" }}-servicemonitor
   labels:
-    {{- include "lmcache.labels" (merge (dict "subname" .name | default "lmcache") $) | nindent 4 }}
+    {{- include "lmcache.labels" (merge (dict "component" .name | default "lmcache") $) | nindent 4 }}
 spec:
   endpoints:
     - honorLabels: false
@@ -18,6 +18,6 @@ spec:
       - {{ $.Release.Namespace }}
   selector:
     matchLabels:
-      {{- include "lmcache.selectorLabels" (merge (dict "subname" .name | default "lmcache") $) | nindent 6 }}
+      {{- include "lmcache.selectorLabels" (merge (dict "component" .name | default "lmcache") $) | nindent 6 }}
 {{- end }}
 {{- end }}
