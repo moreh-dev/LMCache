@@ -73,9 +73,11 @@ ARG NIXL_REPO="github.com/moreh-dev/nixl.git"
 RUN pip install build
 
 RUN --mount=type=secret,id=github_token \
-    GITHUB_TOKEN=$(cat /run/secrets/github_token) \
-    && git clone --branch "0.3.0-rocm" --single-branch "https://${GITHUB_TOKEN}@${NIXL_REPO}" \
-    && cd nixl && echo "$PATH" && python -m build --wheel
+    git config --global \
+    url."https://$(cat /run/secrets/github_token):x-oauth-basic@github.com/".insteadOf \
+    "https://github.com/" \
+    && git clone --branch "0.3.0-rocm" --single-branch "https://${NIXL_REPO}" \
+    && cd nixl && python -m build --wheel
 
 FROM scratch AS export_build
 ARG COMMON_WORKDIR
