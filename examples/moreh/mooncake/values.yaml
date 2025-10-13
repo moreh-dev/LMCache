@@ -35,8 +35,8 @@ mooncake:
     resources: {}
     # -- Service 포트 설정
     port: 50051
-    # -- 노드 어피니티 (nodeAffinity)
-    nodeSelectorTerms: []
+    # -- 어피니티 (affinity)
+    affinity: {}
     # -- 톨러레이션 (tolerations)
     tolerations: []
     # -- Security Context 설정
@@ -61,8 +61,8 @@ mooncake:
     resources: {}
     # -- Service 포트 설정
     port: 8080
-    # -- 노드 어피니티 (nodeAffinity)
-    nodeSelectorTerms: []
+    # -- 어피니티 (affinity)
+    affinity: {}
     # -- 톨러레이션 (tolerations)
     tolerations: []
     # -- Security Context 설정

@@ -9,14 +9,15 @@ A Helm chart for infinistore at k8s
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | fullnameOverride | string | `""` |  |
+| infinistore.affinity | object | `{}` | 어피니티 (affinity) |
 | infinistore.args | list | `[]` | link-type [ IB |  Ethernet ] |
 | infinistore.command | list | `[]` | 컨테이너 시작 시 실행될 명령어 |
 | infinistore.env | list | `[]` | 환경 변수 (env)<br/> 추가 환경 변수를 여기에 정의하세요.<br/> - name: EXTRA_ENV_VAR<br/>   value: "some-value" |
-| infinistore.image | string | `""` | Pod에 사용할 컨테이너 이미지 |
-| infinistore.imagePullPolicy | string | `"Always"` |  |
+| infinistore.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
+| infinistore.image.repository | string | `"192.168.212.30:1780/moreh/infinistore"` | Image repository. |
+| infinistore.image.tag | string | `"v0.2.35-moreh_0805"` | Image tag (defaults to chart appVersion if not set). |
 | infinistore.imagePullSecrets | list | `[]` | 개인 컨테이너 레지스트리에서 이미지를 가져올 때 사용<br/> - name: my-secret-name |
 | infinistore.managePort | int | `18080` |  |
-| infinistore.nodeSelectorTerms | list | `[]` | 노드 어피니티 (nodeAffinity) |
 | infinistore.readinessProbe | object | `{"enabled":true}` | Pod의 레디니스 프로브 설정 |
 | infinistore.replicas | int | `1` | Pod의 복제본 수 |
 | infinistore.resources | object | `{}` | 리소스 할당 (CPU, 메모리, GPU 등) |

@@ -17,12 +17,9 @@ spec:
       labels:
         {{- include "lmcache.labels" (merge (dict "component" .name | default "lmcache") $) | nindent 8 }}
     spec:
-      {{- if .nodeSelectorTerms }}
+      {{- if .affinity }}
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              {{- toYaml .nodeSelectorTerms | nindent 14 }}
+        {{- toYaml .affinity | nindent 8 }}
       {{- end }}
       {{- if .tolerations }}
       tolerations:

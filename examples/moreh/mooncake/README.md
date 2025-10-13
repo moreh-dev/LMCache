@@ -9,25 +9,26 @@ A Helm chart for mooncake at k8s
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | fullnameOverride | string | `""` |  |
-| mooncake.image | string | `""` | Pod에 사용할 컨테이너 이미지 |
-| mooncake.imagePullPolicy | string | `"Always"` |  |
-| mooncake.imagePullSecrets | list | `[]` | - name: my-secret-name |
-| mooncake.master | object | `{"args":[],"command":[],"env":[],"nodeSelectorTerms":[],"port":50051,"readinessProbe":{"enabled":true},"replicas":1,"resources":{},"securityContext":{},"tolerations":[]}` | 마스터 Pod 설정 |
+| mooncake.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
+| mooncake.image.repository | string | `"192.168.212.30:1780/moreh/mooncake"` | Image repository. |
+| mooncake.image.tag | string | `"v0.3.6.post1-moreh_0924"` | Image tag (defaults to chart appVersion if not set). |
+| mooncake.imagePullSecrets | list | `[]` | 개인 컨테이너 레지스트리에서 이미지를 가져올 때 사용<br/> - name: my-secret-name |
+| mooncake.master | object | `{"affinity":{},"args":[],"command":[],"env":[],"port":50051,"readinessProbe":{"enabled":true},"replicas":1,"resources":{},"securityContext":{},"tolerations":[]}` | 마스터 Pod 설정 |
+| mooncake.master.affinity | object | `{}` | 어피니티 (affinity) |
 | mooncake.master.args | list | `[]` | 명령어에 전달될 인수 (위 command와 함께 사용됨) |
 | mooncake.master.command | list | `[]` | 컨테이너 시작 시 실행될 명령어 |
 | mooncake.master.env | list | `[]` | value: "some-value" |
-| mooncake.master.nodeSelectorTerms | list | `[]` | 노드 어피니티 (nodeAffinity) |
 | mooncake.master.port | int | `50051` | Service 포트 설정 |
 | mooncake.master.readinessProbe | object | `{"enabled":true}` | Pod의 레디니스 프로브 설정 |
 | mooncake.master.replicas | int | `1` | Pod의 복제본 수 |
 | mooncake.master.resources | object | `{}` | 리소스 할당 (CPU, 메모리, GPU 등) |
 | mooncake.master.securityContext | object | `{}` | Security Context 설정 |
 | mooncake.master.tolerations | list | `[]` | 톨러레이션 (tolerations) |
-| mooncake.meta | object | `{"args":[],"command":[],"env":[],"nodeSelectorTerms":[],"port":8080,"readinessProbe":{"enabled":true},"replicas":1,"resources":{},"securityContext":{},"tolerations":[]}` | 메타 Pod 설정 |
+| mooncake.meta | object | `{"affinity":{},"args":[],"command":[],"env":[],"port":8080,"readinessProbe":{"enabled":true},"replicas":1,"resources":{},"securityContext":{},"tolerations":[]}` | 메타 Pod 설정 |
+| mooncake.meta.affinity | object | `{}` | 어피니티 (affinity) |
 | mooncake.meta.args | list | `[]` | 명령어에 전달될 인수 (위 command와 함께 사용됨) |
 | mooncake.meta.command | list | `[]` | 컨테이너 시작 시 실행될 명령어 |
 | mooncake.meta.env | list | `[]` | value: "some-value" |
-| mooncake.meta.nodeSelectorTerms | list | `[]` | 노드 어피니티 (nodeAffinity) |
 | mooncake.meta.port | int | `8080` | Service 포트 설정 |
 | mooncake.meta.readinessProbe | object | `{"enabled":true}` | Pod의 레디니스 프로브 설정 |
 | mooncake.meta.replicas | int | `1` | Pod의 복제본 수 |

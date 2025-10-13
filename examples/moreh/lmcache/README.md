@@ -10,13 +10,15 @@ A Helm chart for lmcache to use at k8s. Docker image need to be built separately
 |-----|------|---------|-------------|
 | fullnameOverride | string | `""` |  |
 | lmcache.config | list | `[]` | ConfigMap에 포함될 설정 파일 내용 |
-| lmcache.deployList[0] | object | `{"args":[],"command":[],"env":[],"image":"","imagePullPolicy":"Always","imagePullSecrets":[],"name":"lmcache","nodeSelectorTerms":[],"port":8000,"readinessProbe":true,"replicas":1,"resources":{},"securityContext":{},"serviceMonitor":false,"tolerations":[],"workingDir":"/app"}` | deployment의 이름 |
+| lmcache.deployList[0] | object | `{"affinity":{},"args":[],"command":[],"env":[],"image":{"pullPolicy":"IfNotPresent","repository":"192.168.212.30:1780/moreh/moreh-vllm","tag":"v0.9.0.0708_lmcache_v0.3.7_nixl_0930"},"imagePullSecrets":[],"name":"lmcache","port":8000,"readinessProbe":true,"replicas":1,"resources":{},"securityContext":{},"serviceMonitor":false,"tolerations":[],"workingDir":"/app"}` | deployment의 이름 |
+| lmcache.deployList[0].affinity | object | `{}` | 어피니티 (affinity) |
 | lmcache.deployList[0].args | list | `[]` | 명령어에 전달될 인수 (위 command와 함께 사용됨) |
 | lmcache.deployList[0].command | list | `[]` | 컨테이너 시작 시 실행될 명령어 |
 | lmcache.deployList[0].env | list | `[]` | value: "some-value" |
-| lmcache.deployList[0].image | string | `""` | Pod에 사용할 컨테이너 이미지 |
-| lmcache.deployList[0].imagePullSecrets | list | `[]` | - name: my-secret-name |
-| lmcache.deployList[0].nodeSelectorTerms | list | `[]` | 노드 어피니티 (nodeAffinity) |
+| lmcache.deployList[0].image.pullPolicy | string | `"IfNotPresent"` | Image pull policy. |
+| lmcache.deployList[0].image.repository | string | `"192.168.212.30:1780/moreh/moreh-vllm"` | Image repository. |
+| lmcache.deployList[0].image.tag | string | `"v0.9.0.0708_lmcache_v0.3.7_nixl_0930"` | Image tag (defaults to chart appVersion if not set). |
+| lmcache.deployList[0].imagePullSecrets | list | `[]` | 개인 컨테이너 레지스트리에서 이미지를 가져올 때 사용<br/> - name: my-secret-name |
 | lmcache.deployList[0].port | int | `8000` | Service 포트 설정 |
 | lmcache.deployList[0].readinessProbe | bool | `true` | Pod의 레디니스 프로브 설정 |
 | lmcache.deployList[0].replicas | int | `1` | Pod의 복제본 수 |

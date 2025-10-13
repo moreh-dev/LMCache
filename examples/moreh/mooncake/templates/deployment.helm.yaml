@@ -15,12 +15,9 @@ spec:
       labels:
         {{- include "mooncake.labels" (tuple . "master") | nindent 8 }}
     spec:
-      {{- if .Values.mooncake.master.nodeSelectorTerms }}
+      {{- if .Values.mooncake.master.affinity }}
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              {{- toYaml .Values.mooncake.master.nodeSelectorTerms | nindent 14 }}
+        {{- toYaml .Values.mooncake.master.affinity | nindent 8 }}
       {{- end }}
       {{- if .Values.mooncake.master.tolerations }}
       tolerations:
@@ -72,12 +69,9 @@ spec:
       labels:
         {{- include "mooncake.labels" (tuple . "meta") | nindent 8 }}
     spec:
-      {{- if .Values.mooncake.meta.nodeSelectorTerms }}
+      {{- if .Values.mooncake.meta.affinity }}
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              {{- toYaml .Values.mooncake.meta.nodeSelectorTerms | nindent 14 }}
+        {{- toYaml .Values.mooncake.meta.affinity | nindent 8 }}
       {{- end }}
       {{- if .Values.mooncake.meta.tolerations }}
       tolerations:
