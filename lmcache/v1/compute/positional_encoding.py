@@ -8,7 +8,10 @@ import torch
 
 # First Party
 from lmcache.logging import init_logger
-import lmcache.c_ops as lmc_ops
+
+if torch.cuda.is_available():
+    # First Party
+    import lmcache.c_ops as lmc_ops
 
 logger = init_logger(__name__)
 
@@ -83,7 +86,7 @@ def validate_rope_params(
     head_size: int,
     rotary_dim: int,
     max_position: int,
-    base: int,
+    base: float,
     is_neox_style: bool = True,
     rope_scaling: Optional[Dict[str, Any]] = None,
     dtype: Optional[torch.dtype] = None,

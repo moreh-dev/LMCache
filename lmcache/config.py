@@ -33,6 +33,13 @@ class LMCacheEngineMetadata:
     kv_shape: tuple[int, int, int, int, int]
     """ whether use MLA"""
     use_mla: bool = False
+    """ the first rank of the distributed setting """
+    # TODO(baoloongmao): first_rank should be configurable
+    first_rank = 0
+
+    def is_first_rank(self) -> bool:
+        """Check if the current worker is the first rank"""
+        return self.worker_id == self.first_rank
 
 
 @dataclass
@@ -257,6 +264,11 @@ class LMCacheEngineConfig:
         )
 
         return config.log_config()
+
+    def update_config_from_env(self):
+        """Update the configuration from the environment variables"""
+        # TODO(baoloongmao): implement this when needed
+        pass
 
     def log_config(self) -> "LMCacheEngineConfig":
         """Log all configuration settings"""

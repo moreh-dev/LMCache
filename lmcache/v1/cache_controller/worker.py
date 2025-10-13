@@ -16,8 +16,13 @@ from lmcache.v1.cache_controller.message import (
     ClearWorkerRetMsg,
     CompressWorkerMsg,
     CompressWorkerRetMsg,
+    DecompressWorkerMsg,
+    DecompressWorkerRetMsg,
     DeRegisterMsg,
     ErrorMsg,
+    HealthWorkerMsg,
+    HealthWorkerRetMsg,
+    HeartbeatMsg,
     MoveWorkerMsg,
     MoveWorkerRetMsg,
     Msg,
@@ -25,6 +30,8 @@ from lmcache.v1.cache_controller.message import (
     PinWorkerRetMsg,
     RegisterMsg,
     WorkerMsg,
+    WorkerReqMsg,
+    WorkerReqRetMsg,
 )
 from lmcache.v1.config import LMCacheEngineConfig
 from lmcache.v1.rpc_utils import (
@@ -57,6 +64,7 @@ class LMCacheWorker:
     ):
         # TODO (Jiayi): "instance_id" might not be needed anymore.
         # Please consider removing it.
+        self.config = config
         self.lmcache_instance_id = config.lmcache_instance_id
         assert self.lmcache_instance_id is not None
         self.lmcache_engine = lmcache_engine
@@ -64,27 +72,36 @@ class LMCacheWorker:
 
         self.context = get_zmq_context()
 
-        assert config.controller_url is not None
+        assert config.controller_pull_url is not None
 
+        controller_pull_url = config.controller_pull_url
         self.push_socket = get_zmq_socket(
             self.context,
-            config.controller_url,
+            controller_pull_url,
             protocol="tcp",
             role=zmq.PUSH,  # type: ignore[attr-defined]
             bind_or_connect="connect",
         )
 
-        # TODO(Jiayi): Make this less hard-coded
-        lmcache_worker_port = config.lmcache_worker_port
-        assert lmcache_worker_port is not None
-        # TODO(Jiayi): Make this port assignment smarter
-        lmcache_worker_port += self.worker_id
+        if config.controller_reply_url is not None:
+            controller_rep_url = config.controller_reply_url
+            self.req_socket = get_zmq_socket(
+                self.context,
+                controller_rep_url,
+                protocol="tcp",
+                role=zmq.REQ,  # type: ignore[attr-defined]
+                bind_or_connect="connect",
+            )
+
+        lmcache_worker_port = config.lmcache_worker_ports[self.worker_id]
 
         self.lmcache_worker_internal_url = f"*:{lmcache_worker_port}"
         self.lmcache_worker_ip = get_ip()
         self.lmcache_worker_port = lmcache_worker_port
 
-        self.distributed_url = config.distributed_url
+        self.p2p_host = config.p2p_host
+        self.p2p_init_port = config.p2p_init_ports[self.worker_id]
+        self.p2p_init_url = f"{self.p2p_host}:{self.p2p_init_port}"
 
         self.reply_socket = get_zmq_socket(
             self.context,
@@ -120,7 +137,7 @@ class LMCacheWorker:
                 worker_id=self.worker_id,
                 ip=self.lmcache_worker_ip,
                 port=self.lmcache_worker_port,
-                distributed_url=self.distributed_url,
+                distributed_url=self.p2p_init_url,
             )
         )
 
@@ -138,10 +155,26 @@ class LMCacheWorker:
             )
         )
 
+    async def async_put_and_wait_msg(
+        self,
+        msg: WorkerReqMsg,
+    ) -> WorkerReqRetMsg:
+        """
+        Send a message to the controller and wait for the response.
+        """
+
+        self.req_socket.send(msgspec.msgpack.encode(msg))
+        serialized_ret_msg = await self.req_socket.recv()
+        ret_msg = msgspec.msgpack.decode(serialized_ret_msg, type=Msg)
+        return ret_msg
+
     def put_msg(self, msg: WorkerMsg):
         """
         Put a message into the message queue.
         """
+        # TODO(Jiayi): This might introduce ~0.05ms latency than
+        # a normal function call.
+        # Not sure how much overhead is blocking though.
         self.loop.call_soon_threadsafe(self.msg_queue.put_nowait, msg)
 
     async def batched_get_msg(self, max_bsz: int = 50) -> list[WorkerMsg]:
@@ -164,6 +197,30 @@ class LMCacheWorker:
             except asyncio.QueueEmpty:
                 break
         return batch
+
+    async def heartbeat(self):
+        enable_heartbeat = (
+            self.config.lmcache_worker_heartbeat_time is not None
+            and self.config.lmcache_worker_heartbeat_time > 0
+        )
+        if enable_heartbeat:
+            logger.info(
+                f"Start heartbeat in {self.lmcache_instance_id} : {self.worker_id}, "
+                f"delay time: {self.config.lmcache_worker_heartbeat_delay_time}s, "
+                f"heartbeat time: {self.config.lmcache_worker_heartbeat_time}s"
+            )
+            await asyncio.sleep(self.config.lmcache_worker_heartbeat_delay_time)
+            while True:
+                self.put_msg(
+                    HeartbeatMsg(
+                        instance_id=self.lmcache_instance_id,
+                        worker_id=self.worker_id,
+                        ip=self.lmcache_worker_ip,
+                        port=self.lmcache_worker_port,
+                        distributed_url=self.p2p_init_url,
+                    )
+                )
+                await asyncio.sleep(self.config.lmcache_worker_heartbeat_time)
 
     async def push(self):
         while True:
@@ -197,16 +254,19 @@ class LMCacheWorker:
                     if new_position[0] == self.lmcache_worker_internal_url:
                         # TODO(Jiayi): currently we only support moving from
                         # local disk to local cpu.
-                        assert old_position[1] == "disk"
-                        assert new_position[1] == "cpu"
+                        assert old_position[1] == "LocalDiskBackend"
+                        assert new_position[1] == "LocalCPUBackend"
                         assert do_copy
 
                         # TODO(Jiayi): We need to align prefetch and move.
                         logger.debug("Executing prefetch operation.")
-                        self.lmcache_engine.prefetch(tokens)
-                        num_tokens = 0
+                        raise NotImplementedError(
+                            "Prefetch from controller is not implemented yet."
+                        )
                     else:
-                        assert self.lmcache_engine.distributed_server is not None
+                        assert new_position[1] == "LocalCPUBackend", (
+                            "Only support moving to cpu for now."
+                        )
                         logger.debug("Executing cross-node move operation.")
                         num_tokens = self.lmcache_engine.move(
                             tokens=tokens,
@@ -232,6 +292,16 @@ class LMCacheWorker:
                     serialized_ret_msg = msgspec.msgpack.encode(
                         CompressWorkerRetMsg(num_tokens=num_compressed_tokens)
                     )
+                elif isinstance(request, DecompressWorkerMsg):
+                    num_decompressed_tokens = self.lmcache_engine.decompress(
+                        tokens=request.tokens,
+                        method=request.method,
+                        location=request.location,
+                        event_id=request.worker_event_id,
+                    )
+                    serialized_ret_msg = msgspec.msgpack.encode(
+                        DecompressWorkerRetMsg(num_tokens=num_decompressed_tokens)
+                    )
                 elif isinstance(request, PinWorkerMsg):
                     num_pinned_tokens = self.lmcache_engine.lookup(
                         tokens=request.tokens,
@@ -248,6 +318,11 @@ class LMCacheWorker:
                     )
                     serialized_ret_msg = msgspec.msgpack.encode(
                         ClearWorkerRetMsg(num_tokens=num_cleared_tokens)
+                    )
+                elif isinstance(request, HealthWorkerMsg):
+                    error_code = self.lmcache_engine.health()
+                    serialized_ret_msg = msgspec.msgpack.encode(
+                        HealthWorkerRetMsg(error_code=error_code)
                     )
                 else:
                     logger.error(f"Unknown message: {request}")
@@ -272,6 +347,7 @@ class LMCacheWorker:
             await asyncio.gather(
                 self.push(),
                 self.handle_request(),
+                self.heartbeat(),
             )
         except Exception as e:
             logger.error(

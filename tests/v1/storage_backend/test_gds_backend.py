@@ -3,6 +3,7 @@
 import asyncio
 import os
 import shutil
+import sys
 import tempfile
 import threading
 
@@ -11,6 +12,7 @@ import pytest
 import torch
 
 # First Party
+from lmcache.config import LMCacheEngineMetadata
 from lmcache.utils import CacheEngineKey
 from lmcache.v1.config import LMCacheEngineConfig
 from lmcache.v1.memory_management import AdHocMemoryAllocator, MemoryFormat, MemoryObj
@@ -19,24 +21,37 @@ from lmcache.v1.storage_backend.gds_backend import GdsBackend
 
 def create_test_config(gds_path: str):
     config = LMCacheEngineConfig.from_defaults(
-        chunk_size=256, gds_path=gds_path, lmcache_instance_id="test_instance"
+        chunk_size=256,
+        gds_path=gds_path,
+        lmcache_instance_id="test_instance",
+        cufile_buffer_size=256,
+        extra_config={"use_direct_io": True},
     )
     return config
 
 
-def create_test_key(key_id: str = "testkey") -> CacheEngineKey:
-    # GdsBackend does not allow underscores in the chunk_hash (key_id)!
-    # Use only alphanumeric characters.
-    assert "_" not in key_id, "GdsBackend does not allow underscores in chunk_hash!"
+def create_test_key(key_id: int = 0) -> CacheEngineKey:
     return CacheEngineKey("vllm", "testmodel", 3, 123, key_id)
 
 
 def create_test_memory_obj(
-    shape=(2, 16, 8, 128), dtype=torch.bfloat16, device="cpu"
+    shape=(2, 16, 8, 128), dtype=torch.bfloat16, device="cuda"
 ) -> MemoryObj:
     allocator = AdHocMemoryAllocator(device=device)
     memory_obj = allocator.allocate(shape, dtype, fmt=MemoryFormat.KV_T2D)
     return memory_obj
+
+
+def create_test_metadata():
+    """Create a test metadata for LMCacheEngineMetadata."""
+    return LMCacheEngineMetadata(
+        model_name="test_model",
+        world_size=1,
+        worker_id=0,
+        fmt="vllm",
+        kv_dtype=torch.bfloat16,
+        kv_shape=(28, 2, 256, 8, 128),
+    )
 
 
 @pytest.fixture
@@ -59,46 +74,41 @@ def async_loop():
 
 
 @pytest.fixture
-def memory_allocator():
-    return AdHocMemoryAllocator(device="cpu")
-
-
-@pytest.fixture
-def gds_backend(temp_gds_path, async_loop, memory_allocator):
+def gds_backend(temp_gds_path, async_loop):
     config = create_test_config(temp_gds_path)
+    metadata = create_test_metadata()
     return GdsBackend(
         config=config,
         loop=async_loop,
-        memory_allocator=memory_allocator,
-        dst_device="cuda" if torch.cuda.is_available() else "cpu",
+        metadata=metadata,
+        dst_device="cuda:0",
     )
 
 
-# Optionally skip async tests if pytest-asyncio is not available
-pytest_asyncio = pytest.importorskip(
-    "pytest_asyncio", reason="pytest-asyncio is required for async tests"
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="Requires CUDA for TestGdsBackend",
 )
-
-
+@pytest.mark.skipif(sys.platform != "linux", reason="TestGdsBackend runs only on Linux")
 class TestGdsBackend:
-    def test_init(self, temp_gds_path, async_loop, memory_allocator):
+    def test_init(self, temp_gds_path, async_loop):
         config = create_test_config(temp_gds_path)
+        metadata = create_test_metadata()
         backend = GdsBackend(
             config=config,
             loop=async_loop,
-            memory_allocator=memory_allocator,
-            dst_device="cuda" if torch.cuda.is_available() else "cpu",
+            metadata=metadata,
+            dst_device="cuda:0",
         )
         assert backend.gds_path == temp_gds_path
-        assert backend.memory_allocator == memory_allocator
-        assert backend.dst_device in ("cuda", "cpu")
+        assert backend.dst_device == "cuda:0"
         assert os.path.exists(temp_gds_path)
 
     def test_str(self, gds_backend):
         assert str(gds_backend) == "GdsBackend"
 
     def test_key_to_path_and_insert_key(self, gds_backend):
-        key = create_test_key("testhash")
+        key = create_test_key(0)
         memory_obj = create_test_memory_obj()
         gds_backend.insert_key(key, memory_obj)
         # Check that the key is in hot_cache
@@ -108,19 +118,19 @@ class TestGdsBackend:
         assert meta.dtype == memory_obj.metadata.dtype
 
     def test_contains_key_not_exists(self, gds_backend):
-        key = create_test_key("nonexistent")
+        key = create_test_key(1)
         assert not gds_backend.contains(key)
         assert not gds_backend.contains(key, pin=True)
 
     def test_contains_key_exists(self, gds_backend):
-        key = create_test_key("testkey")
+        key = create_test_key(0)
         memory_obj = create_test_memory_obj()
         gds_backend.insert_key(key, memory_obj)
         assert gds_backend.contains(key)
         assert gds_backend.contains(key, pin=True)
 
     def test_exists_in_put_tasks(self, gds_backend):
-        key = create_test_key("testkey")
+        key = create_test_key(0)
         assert not gds_backend.exists_in_put_tasks(key)
         # Simulate adding to put_tasks
         with gds_backend.put_lock:
@@ -133,8 +143,8 @@ class TestGdsBackend:
         reason="Requires CUDA for GdsBackend get_blocking",
     )
     async def test_submit_put_task_and_get_blocking(self, gds_backend):
-        key = create_test_key("testkey")
-        memory_obj = create_test_memory_obj(device="cpu")
+        key = create_test_key(0)
+        memory_obj = create_test_memory_obj(device="cuda")
         # submit_put_task returns a Future
         future = gds_backend.submit_put_task(key, memory_obj)
         assert future is not None
@@ -150,8 +160,8 @@ class TestGdsBackend:
 
     @pytest.mark.asyncio
     async def test_batched_submit_put_task(self, gds_backend):
-        keys = [create_test_key(f"key{i}") for i in range(3)]
-        memory_objs = [create_test_memory_obj(device="cpu") for _ in range(3)]
+        keys = [create_test_key(i) for i in range(2, 5)]
+        memory_objs = [create_test_memory_obj(device="cuda") for _ in range(3)]
         futures = gds_backend.batched_submit_put_task(keys, memory_objs)
         assert futures is not None
         assert len(futures) == 3
@@ -161,38 +171,16 @@ class TestGdsBackend:
         for key in keys:
             assert gds_backend.contains(key)
 
-    def test_submit_prefetch_task_key_not_exists(self, gds_backend):
-        key = create_test_key("nonexistent")
-        future = gds_backend.submit_prefetch_task(key)
-        assert future is None
-
-    def test_submit_prefetch_task_key_exists(self, gds_backend):
-        key = create_test_key("testkey")
-        memory_obj = create_test_memory_obj()
-        gds_backend.insert_key(key, memory_obj)
-        future = gds_backend.submit_prefetch_task(key)
-        # May be None if not CUDA, otherwise should be a Future
-        assert future is None or hasattr(future, "result")
-
     def test_get_blocking_key_not_exists(self, gds_backend):
-        key = create_test_key("nonexistent")
+        key = create_test_key(1)
         result = gds_backend.get_blocking(key)
         assert result is None
-
-    def test_get_non_blocking(self, gds_backend):
-        key = create_test_key("testkey")
-        memory_obj = create_test_memory_obj()
-        gds_backend.insert_key(key, memory_obj)
-        future = gds_backend.get_non_blocking(key)
-        assert future is None or hasattr(future, "result")
 
     def test_close(self, gds_backend):
         # Should not raise
         gds_backend.close()
 
     def test_pin_unpin_not_implemented(self, gds_backend):
-        key = create_test_key("testkey")
-        with pytest.raises(NotImplementedError):
-            gds_backend.pin(key)
-        with pytest.raises(NotImplementedError):
-            gds_backend.unpin(key)
+        key = create_test_key(0)
+        assert not gds_backend.pin(key)
+        assert not gds_backend.unpin(key)

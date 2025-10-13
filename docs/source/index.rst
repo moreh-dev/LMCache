@@ -59,14 +59,23 @@ For more information, check out the following:
 Documentation
 -------------
 
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Welcome to LMCache
+
+   self
+
 .. toctree::
    :maxdepth: 2
    :caption: Getting Started
 
    getting_started/installation
    getting_started/quickstart/index
+   getting_started/benchmarking
    getting_started/troubleshoot
    getting_started/faq
+   
 
 :raw-html:`<br />`
 
@@ -74,14 +83,8 @@ Documentation
    :maxdepth: 2
    :caption: KV Cache offloading and sharing
 
-   kv_cache/cpu_ram
-   kv_cache/local_storage
-   kv_cache/gds
-   kv_cache/redis
-   kv_cache/infinistore
-   kv_cache/mooncake
-   kv_cache/valkey
-   kv_cache/weka
+   kv_cache/storage_backends/index
+   kv_cache/caching_policies
 
 :raw-html:`<br />`
 
@@ -98,13 +101,7 @@ Documentation
    :maxdepth: 2
    :caption: KV Cache management
 
-   kv_cache_management/controller
-   kv_cache_management/lookup
-   kv_cache_management/persist
-   kv_cache_management/clear
-   kv_cache_management/move
-   kv_cache_management/compress
-   kv_cache_management/check_finish
+   kv_cache_management/index
 
 :raw-html:`<br />`
 
@@ -114,6 +111,7 @@ Documentation
 
    kv_cache_optimizations/compression/index
    kv_cache_optimizations/blending
+   kv_cache_optimizations/layerwise
 
 :raw-html:`<br />`
 
@@ -123,15 +121,26 @@ Documentation
 
    production/docker_deployment
    production/kubernetes_deployment
+   production/observability/index
 
 :raw-html:`<br />`
 
 .. toctree::
    :maxdepth: 2
+   :caption: Internal API Server
+   
+   internal_api_server/internal_api_server
+
+:raw-html:`<br />`
+
+.. toctree::
    :caption: Developer Guide
 
    developer_guide/contributing
    developer_guide/docker_file
+   developer_guide/architecture
+   developer_guide/integration
+   developer_guide/extending_lmcache/index
    developer_guide/usage/index
 
 :raw-html:`<br />`
@@ -143,7 +152,8 @@ Documentation
    api_reference/configurations
    api_reference/storage_backends
    api_reference/dynamic_connector
-
+   api_reference/multimodality
+   
 :raw-html:`<br />`
 
 .. toctree::

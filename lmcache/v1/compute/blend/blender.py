@@ -1,14 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 # Standard
-from typing import Optional
+from typing import Optional, Union
 
 # Third Party
 import torch
 
 # First Party
 from lmcache.logging import init_logger
+from lmcache.v1.compute.attention.metadata import LMCAttnMetadata
 from lmcache.v1.compute.blend.metadata import LMCBlendCommonMetadata, LMCBlendMetadata
 from lmcache.v1.compute.models.utils import infer_model_from_vllm
+from lmcache.v1.config import LMCacheEngineConfig
 
 logger = init_logger(__name__)
 
@@ -24,20 +26,27 @@ class LMCBlender:
         cache_engine,
         gpu_connector,
         vllm_model,
+        config: LMCacheEngineConfig,
     ):
         self.cache_engine = cache_engine
         self.gpu_connector = gpu_connector
 
-        self.layerwise_model = infer_model_from_vllm(vllm_model, self)
+        enable_sparse = False
+        if config.extra_config is not None:
+            enable_sparse = config.extra_config.get("enable_sparse", False)
+
+        self.layerwise_model = infer_model_from_vllm(vllm_model, self, enable_sparse)
 
         # TODO: remove this hardcode
         self.num_layers = len(vllm_model.model.layers)
 
-        # TODO (Jiayi): make this less hard-coded
+        # TODO(Jiayi): support threshold-based blending
+        # TODO(Jiayi): support different ratios for different layers
+        # TODO(Jiayi): support "skipping blending if hit too short"
         self.common_metadata = LMCBlendCommonMetadata(
-            check_layers=[1],
-            recomp_ratios=[0.15],
-            thresholds=None,
+            check_layers=config.blend_check_layers,
+            recomp_ratios=config.blend_recompute_ratios,
+            thresholds=config.blend_thresholds,
         )
 
         # This will be set during the blending process
@@ -55,7 +64,7 @@ class LMCBlender:
         residual: torch.Tensor,
         layer_id: int,
         attn_output: Optional[torch.Tensor],
-        attn_metadata,
+        attn_metadata: LMCAttnMetadata,
     ):
         logger.debug(f"Blender is processing KV for layer {layer_id}")
         old_k, old_v = self.gpu_connector.get_kv(layer_id)
@@ -82,6 +91,8 @@ class LMCBlender:
             )
             total_len = diff_k.shape[0]
 
+            assert self.common_metadata.recomp_ratios is not None
+
             # TODO(Jiayi): remove `[0]` hardcode
             topk_num = int(total_len * self.common_metadata.recomp_ratios[0])
 
@@ -92,15 +103,13 @@ class LMCBlender:
             q = q[top_indices]
             residual = residual[top_indices]
 
-            logger.debug(f"Picking indices: {top_indices}")
+            logger.debug(f"Number of indices picked: {len(top_indices)}")
+
             self.metadata.imp_indices = top_indices
             self.metadata.positions = self.metadata.positions[top_indices]
             attn_output = attn_output[:topk_num]
 
-            attn_metadata.max_query_len = topk_num
-            attn_metadata.query_start_loc = torch.tensor(
-                [0, topk_num], dtype=torch.int32, device=q.device
-            )
+            attn_metadata.update_from_top_indices(top_indices)
 
         if self.metadata.imp_indices is not None:
             old_k[self.metadata.imp_indices] = k
@@ -141,13 +150,17 @@ class LMCBlender:
 
     def blend(
         self,
-        tokens: torch.Tensor,
+        tokens: Union[torch.Tensor, list[int]],
         mask: Optional[torch.Tensor] = None,
         **kwargs,
     ):
         """
         Perform blending for the given tokens.
         """
+
+        if isinstance(tokens, list):
+            tokens = torch.tensor(tokens).cuda()
+
         layerwise_blender = self.blend_layer(tokens, mask, **kwargs)
 
         for i in range(self.num_layers + 2):

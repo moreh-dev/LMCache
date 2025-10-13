@@ -6,6 +6,7 @@ import threading
 import time
 
 # Third Party
+import pytest
 import torch
 
 # First Party
@@ -13,9 +14,12 @@ from lmcache.logging import init_logger
 from lmcache.utils import CacheEngineKey
 from lmcache.v1.memory_management import AdHocMemoryAllocator, MemoryFormat, MemoryObj
 
+pytest.importorskip("nixl", reason="nixl package is required for nixl tests")
+
+# First Party
 # from lmcache.v1.storage_backend.connector.nixl_connector import (
 #    NixlChannel, NixlConfig, NixlObserverInterface, NixlRole)
-from lmcache.v1.storage_backend.connector.nixl_connector_v2 import (
+from lmcache.v1.storage_backend.connector.nixl_connector import (
     NixlChannel,
     NixlConfig,
     NixlObserverInterface,
@@ -40,7 +44,7 @@ def generate_test_data(
                 model_name="test_model",
                 world_size=1,
                 worker_id=0,
-                chunk_hash=f"test_{i}",
+                chunk_hash=i,
             )
         )
         obj = allocator.allocate(shape, dtype, fmt=MemoryFormat.KV_2LTD)
@@ -61,6 +65,7 @@ class TestObserver(NixlObserverInterface):
     def __init__(self):
         self.received_keys = []
         self.received_tensors = []
+        self.received_objs = []
         self.received_event = threading.Event()
         self.expected_count = None
         self.reset()

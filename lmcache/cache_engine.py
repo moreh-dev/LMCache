@@ -38,19 +38,21 @@ class LMCacheEngine:
         self.hit_tokens_count = 0
         self.hit_rate = 0.0
 
-        self.engine_ = CreateStorageBackend(config, metadata)
+        self.engine_ = CreateStorageBackend(
+            config, metadata, "cuda" if torch.cuda.is_available() else "cpu"
+        )
         logger.debug(f"Current storage backend type {type(self.engine_)}")
 
         InitializeUsageContext(config, metadata)
         self.stats_monitor = LMCStatsMonitor.GetOrCreate()
 
-    def _make_key(self, chunk_hash: str, fmt: str) -> CacheEngineKey:
+    def _make_key(self, chunk_hash: int, fmt: str) -> CacheEngineKey:
         return CacheEngineKey(
             fmt,
             self.metadata.model_name,
             self.metadata.world_size,
             self.metadata.worker_id,
-            int(chunk_hash),
+            chunk_hash,
         )
 
     def _num_tokens_in_kv(
@@ -70,7 +72,7 @@ class LMCacheEngine:
         self,
         tokens: torch.Tensor,
         prefix_hash: int,
-    ) -> str:
+    ) -> int:
         return hash((prefix_hash, tuple(tokens.tolist())))
 
     def _chunk_tokens(
@@ -95,7 +97,7 @@ class LMCacheEngine:
         self,
         token_chunks: Iterable[torch.Tensor],
         num_skip_chunk: Optional[int] = 0,
-    ) -> List[str]:
+    ) -> List[int]:
         prefix_hash = self._get_init_hash()
         prefix_hashes = []
         for token_chunk in token_chunks:
@@ -197,7 +199,7 @@ class LMCacheEngine:
         kv_tensors: torch.Tensor,
         fmt: str,
         num_skip_prefix_chunk=0,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[Tuple[int, torch.Tensor]]:
         """
         Skip the existing chunks and return the rest of the chunks
         """
@@ -231,7 +233,7 @@ class LMCacheEngine:
         fmt: str,
         num_skip_prefix_chunk=0,
         skip_existing=True,
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+    ) -> Iterable[Tuple[int, torch.Tensor]]:
         """
         Returns a generator of zipped (chunk_hash, chunk_kv) tuples
         """
@@ -532,7 +534,6 @@ class LMCacheEngineBuilder:
     @classmethod
     def destroy(cls, instance_id: str) -> None:
         """Close and delete the LMCacheEngine instance by the instance ID"""
-        # TODO: unit test for this
         if instance_id in cls._instances:
             engine = cls._instances[instance_id]
             engine.close()

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Dict, List, Optional, Tuple
 import argparse
 import asyncio
+import json
 import uuid
 
 # Third Party
@@ -21,6 +22,9 @@ from lmcache.v1.cache_controller.message import (  # noqa: E501
     ClearRetMsg,
     CompressMsg,
     CompressRetMsg,
+    DecompressMsg,
+    DecompressRetMsg,
+    ErrorMsg,
     HealthMsg,
     HealthRetMsg,
     LookupMsg,
@@ -36,11 +40,11 @@ from lmcache.v1.cache_controller.message import (  # noqa: E501
 logger = init_logger(__name__)
 
 
-def create_app(controller_url: str) -> FastAPI:
+def create_app(controller_urls: dict[str, str]) -> FastAPI:
     """
     Create a FastAPI application with endpoints for LMCache operations.
     """
-    lmcache_controller_manager = LMCacheControllerManager(controller_url)
+    lmcache_controller_manager = LMCacheControllerManager(controller_urls)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -69,12 +73,13 @@ def create_app(controller_url: str) -> FastAPI:
     @app.post("/query_instance")
     async def query_instance(req: QueryInstRequest):
         try:
-            event_id = ("QueryInst" + str(uuid.uuid4()),)
+            event_id = "QueryInst" + str(uuid.uuid4())
             msg = QueryInstMsg(
                 event_id=event_id,
                 ip=req.ip,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, QueryInstRetMsg)
             return QueryInstResponse(
                 event_id=ret_msg.event_id,
@@ -100,6 +105,7 @@ def create_app(controller_url: str) -> FastAPI:
                 tokens=req.tokens,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, LookupRetMsg)
             return LookupResponse(
                 event_id=ret_msg.event_id, layout_info=ret_msg.layout_info
@@ -125,6 +131,7 @@ def create_app(controller_url: str) -> FastAPI:
                 location=req.location,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, ClearRetMsg)
             return ClearResponse(
                 event_id=ret_msg.event_id, num_tokens=ret_msg.num_tokens
@@ -152,6 +159,7 @@ def create_app(controller_url: str) -> FastAPI:
                 tokens=req.tokens,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, PinRetMsg)
             return PinResponse(event_id=ret_msg.event_id, num_tokens=ret_msg.num_tokens)
         except Exception as e:
@@ -167,6 +175,16 @@ def create_app(controller_url: str) -> FastAPI:
         event_id: str
         num_tokens: int
 
+    class DecompressRequest(BaseModel):
+        instance_id: str
+        method: str
+        location: str
+        tokens: Optional[List[int]] = []
+
+    class DecompressResponse(BaseModel):
+        event_id: str
+        num_tokens: int
+
     @app.post("/compress", response_model=CompressResponse)
     async def compress(req: CompressRequest):
         try:
@@ -179,8 +197,28 @@ def create_app(controller_url: str) -> FastAPI:
                 tokens=req.tokens,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, CompressRetMsg)
             return CompressResponse(
+                event_id=ret_msg.event_id, num_tokens=ret_msg.num_tokens
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e)) from e
+
+    @app.post("/decompress", response_model=DecompressResponse)
+    async def decompress(req: DecompressRequest):
+        try:
+            event_id = "Decompress" + str(uuid.uuid4())
+            msg = DecompressMsg(
+                event_id=event_id,
+                instance_id=req.instance_id,
+                method=req.method,
+                location=req.location,
+                tokens=req.tokens,
+            )
+            ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert isinstance(ret_msg, DecompressRetMsg)
+            return DecompressResponse(
                 event_id=ret_msg.event_id, num_tokens=ret_msg.num_tokens
             )
         except Exception as e:
@@ -209,6 +247,7 @@ def create_app(controller_url: str) -> FastAPI:
                 copy=req.copy,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, MoveRetMsg)
             return MoveResponse(
                 event_id=ret_msg.event_id,
@@ -222,19 +261,23 @@ def create_app(controller_url: str) -> FastAPI:
 
     class HealthResponse(BaseModel):
         event_id: str
-        alive: bool
+        # worker_id -> error_code
+        error_codes: dict[int, int]
 
     @app.post("/health", response_model=HealthResponse)
     async def health(req: HealthRequest):
         try:
-            event_id = "Health" + str(uuid.uuid4())
+            event_id = "health" + str(uuid.uuid4())
             msg = HealthMsg(
                 event_id=event_id,
                 instance_id=req.instance_id,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, HealthRetMsg)
-            return HealthResponse(event_id=ret_msg.event_id, alive=ret_msg.alive)
+            return HealthResponse(
+                event_id=ret_msg.event_id, error_codes=ret_msg.error_codes
+            )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -251,6 +294,7 @@ def create_app(controller_url: str) -> FastAPI:
                 event_id=req.event_id,
             )
             ret_msg = await lmcache_controller_manager.handle_orchestration_message(msg)
+            assert not isinstance(ret_msg, ErrorMsg), ret_msg.error
             assert isinstance(ret_msg, CheckFinishRetMsg)
             return CheckFinishResponse(status=ret_msg.status)
         except Exception as e:
@@ -263,15 +307,40 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=9000)
-    parser.add_argument("--monitor-port", type=int, default=9001)
+    parser.add_argument(
+        "--monitor-ports",
+        type=json.loads,
+        default=None,
+        help='JSON string of monitor ports, e.g. \'{"pull": 8300, "reply": 8400}\'',
+    )
+    parser.add_argument(
+        "--monitor-port",
+        type=int,
+        default=9001,
+        help="The controller pull port to maintain backward compatibility.",
+    )
 
     args = parser.parse_args()
 
     try:
-        app = create_app(f"{args.host}:{args.monitor_port}")
+        if args.monitor_ports is not None:
+            controller_urls = {
+                "pull": f"{args.host}:{args.monitor_ports['pull']}",
+                "reply": f"{args.host}:{args.monitor_ports['reply']}",
+            }
+        else:
+            logger.warning(
+                "Argument --monitor-port will be deprecated soon. "
+                "Please use --monitor-ports instead."
+            )
+            controller_urls = {
+                "pull": f"{args.host}:{args.monitor_port}",
+                "reply": None,
+            }
+        app = create_app(controller_urls)
 
         logger.info(f"Starting LMCache controller at {args.host}:{args.port}")
-        logger.info(f"Monitoring lmcache workers at port {args.monitor_port}")
+        logger.info(f"Monitoring lmcache workers at ports {args.monitor_ports}")
 
         uvicorn.run(app, host=args.host, port=args.port)
     except TimeoutError as e:
