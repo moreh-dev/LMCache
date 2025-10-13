@@ -5,13 +5,15 @@ nameOverride: ""
 fullnameOverride: ""
 
 mooncake:
-  image: "192.168.212.30:1780/moreh/mooncake:v0.3.6.post1-moreh_0924"
+  image:
+    repository: "192.168.212.30:1780/moreh/mooncake"
+    tag: "v0.3.6.post1-moreh_0924"
   master:
     replicas: 1
     command:
       - /bin/bash
       - -lc
-    args: 
+    args:
       - |
         mooncake_master -v=1 -port=50051 --enable_ha true --etcd_endpoints etcd-ts:2379
     port: 50051
@@ -27,7 +29,7 @@ mooncake:
     command:
       - /bin/bash
       - -lc
-    args: 
+    args:
       - |
         mooncake_http_metadata_server --port 8080
     port: 8080

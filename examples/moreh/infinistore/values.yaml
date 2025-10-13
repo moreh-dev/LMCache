@@ -8,9 +8,13 @@ fullnameOverride: ""
 infinistore:
   # -- Pod의 복제본 수
   replicas: 1
-  # -- Pod에 사용할 컨테이너 이미지
-  image: ""
-  imagePullPolicy: "Always"
+  image:
+    # -- Image repository.
+    repository: "192.168.212.30:1780/moreh/infinistore"
+    # -- Image tag (defaults to chart appVersion if not set).
+    tag: "v0.2.35-moreh_0805"
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
   # -- 개인 컨테이너 레지스트리에서 이미지를 가져올 때 사용<br/>
   # - name: my-secret-name
   imagePullSecrets: []

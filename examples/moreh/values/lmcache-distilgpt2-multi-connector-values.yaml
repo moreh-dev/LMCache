@@ -17,7 +17,9 @@ lmcache:
   deployList:
     - name: "lmcache"
       replicas: 1
-      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
+      image:
+        repository: "192.168.212.30:1780/moreh/moreh-vllm"
+        tag: "v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
       command:
         - /bin/bash
         - -lc
@@ -46,7 +48,9 @@ lmcache:
           effect: NoSchedule
     - name: "prefill"
       replicas: 1
-      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
+      image:
+        repository: "192.168.212.30:1780/moreh/moreh-vllm"
+        tag: "v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
       command:
         - /bin/bash
         - -lc
@@ -80,7 +84,9 @@ lmcache:
           effect: NoSchedule
     - name: "decode"
       replicas: 1
-      image: "192.168.212.30:1780/moreh/moreh-vllm:v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
+      image:
+        repository: "192.168.212.30:1780/moreh/moreh-vllm"
+        tag: "v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
       command:
         - /bin/bash
         - -lc

@@ -5,7 +5,9 @@ nameOverride: ""
 fullnameOverride: ""
 
 infinistore:
-  image: "192.168.212.30:1780/moreh/infinistore:v0.2.35-moreh_0805"
+  image:
+    repository: "192.168.212.30:1780/moreh/infinistore"
+    tag: "v0.2.35-moreh_0805"
   replicas: 1
   command:
     - /bin/bash

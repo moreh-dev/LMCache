@@ -44,8 +44,8 @@ spec:
           securityContext:
             {{- toYaml .Values.mooncake.master.securityContext | nindent 12 }}
           {{- end }}
-          image: {{.Values.mooncake.image}}
-          imagePullPolicy: {{.Values.imagePullPolicy}}
+          image: {{.Values.mooncake.image.repository}}:{{.Values.mooncake.image.tag}}
+          imagePullPolicy: {{.Values.mooncake.image.pullPolicy}}
           resources:
             {{- toYaml .Values.mooncake.master.resources | nindent 12 }}
           workingDir: {{.Values.workingDir}}
@@ -101,8 +101,8 @@ spec:
           securityContext:
             {{- toYaml .Values.mooncake.meta.securityContext | nindent 12 }}
           {{- end }}
-          image: {{.Values.mooncake.image}}
-          imagePullPolicy: {{.Values.imagePullPolicy}}
+          image: {{.Values.mooncake.image.repository}}:{{.Values.mooncake.image.tag}}
+          imagePullPolicy: {{.Values.mooncake.image.pullPolicy}}
           resources:
             {{- toYaml .Values.mooncake.meta.resources | nindent 12 }}
           workingDir: {{.Values.workingDir}}

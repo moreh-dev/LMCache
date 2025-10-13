@@ -54,8 +54,8 @@ spec:
           securityContext:
             {{- toYaml .securityContext | nindent 12 }}
           {{- end }}
-          image: {{ .image }}
-          imagePullPolicy: {{ .imagePullPolicy | default "Always" }}
+          image: {{ .image.repository }}:{{ .image.tag }}
+          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
           resources:
             {{- toYaml .resources | nindent 12 }}
           workingDir: {{ .workingDir | default "/app" }}
