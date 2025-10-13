@@ -16,12 +16,9 @@ spec:
       labels:
         {{- include "infinistore.labels" . | nindent 8 }}
     spec:
-      {{- if .Values.infinistore.nodeSelectorTerms }}
+      {{- if .Values.infinistore.affinity }}
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              {{- toYaml .Values.infinistore.nodeSelectorTerms | nindent 14 }}
+        {{- toYaml .Values.infinistore.affinity | nindent 8 }}
       {{- end }}
       {{- if .Values.infinistore.tolerations }}
       tolerations:
@@ -45,8 +42,8 @@ spec:
           securityContext:
             {{- toYaml .Values.infinistore.securityContext | nindent 12 }}
           {{- end }}
-          image: {{.Values.infinistore.image}}
-          imagePullPolicy: {{.Values.imagePullPolicy}}
+          image: {{.Values.infinistore.image.repository}}:{{.Values.infinistore.image.tag}}
+          imagePullPolicy: {{.Values.infinistore.image.pullPolicy}}
           resources:
             {{- toYaml .Values.infinistore.resources | nindent 12 }}
           workingDir: {{.Values.workingDir}}

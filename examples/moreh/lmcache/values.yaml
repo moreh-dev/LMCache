@@ -1,0 +1,50 @@
+# Default values for lmcache.
+# This is a YAML-formatted file.
+
+# This is to override the chart name.
+nameOverride: ""
+fullnameOverride: ""
+
+lmcache:
+  # -- ConfigMap에 포함될 설정 파일 내용
+  config: []
+  deployList:
+    # -- deployment의 이름
+    - name: "lmcache"
+      # -- Pod의 복제본 수
+      replicas: 1
+      image:
+        # -- Image repository.
+        repository: "192.168.212.30:1780/moreh/moreh-vllm"
+        # -- Image tag (defaults to chart appVersion if not set).
+        tag: "v0.9.0.0708_lmcache_v0.3.7_nixl_0930"
+        # -- Image pull policy.
+        pullPolicy: IfNotPresent
+      # -- 개인 컨테이너 레지스트리에서 이미지를 가져올 때 사용<br/>
+      # - name: my-secret-name
+      imagePullSecrets: []
+      # -- 작업 디렉토리
+      workingDir: "/app"
+      # -- 컨테이너 시작 시 실행될 명령어
+      command: []
+      # -- 명령어에 전달될 인수 (위 command와 함께 사용됨)
+      args: []
+      # -- 환경 변수 (env)<br/>
+      # -- 추가 환경 변수를 여기에 정의하세요.<br/>
+      # -- - name: EXTRA_ENV_VAR<br/>
+      # --   value: "some-value"
+      env: []
+      # -- 리소스 할당 (CPU, 메모리, GPU 등)
+      resources: {}
+      # -- Service 포트 설정
+      port: 8000
+      # -- 어피니티 (affinity)
+      affinity: {}
+      # -- 톨러레이션 (tolerations)
+      tolerations: []
+      # -- Security Context 설정
+      securityContext: {}
+      # -- Pod의 레디니스 프로브 설정
+      readinessProbe: true
+      # -- serviceMonitor 설정
+      serviceMonitor: false

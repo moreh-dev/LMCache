@@ -48,5 +48,6 @@ Selector labels
 {{- define "lmcache.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "lmcache.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: {{ .component | default "lmcache" }}
 {{- end }}
 

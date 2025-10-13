@@ -1,0 +1,69 @@
+{{- range .Values.lmcache.deployList }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lmcache.fullname" $ }}-{{ .name | default "lmcache" }}-deployment
+  labels:
+    {{- include "lmcache.labels" (merge (dict "component" .name | default "lmcache") $) | nindent 4 }}
+spec:
+  replicas: {{ .replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "lmcache.selectorLabels" (merge (dict "component" .name | default "lmcache") $) | nindent 6 }}
+  template:
+    metadata:
+      name: {{ include "lmcache.fullname" $ }}-pod
+      labels:
+        {{- include "lmcache.labels" (merge (dict "component" .name | default "lmcache") $) | nindent 8 }}
+    spec:
+      {{- if .affinity }}
+      affinity:
+        {{- toYaml .affinity | nindent 8 }}
+      {{- end }}
+      {{- if .tolerations }}
+      tolerations:
+        {{- toYaml .tolerations | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: lmcache-config
+          configMap:
+            name: {{ include "lmcache.fullname" $ }}-config
+      {{- if .imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .imagePullSecrets | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "lmcache.name" $ }}-container
+          command:
+            {{- toYaml .command | nindent 12 }}
+          args:
+            {{- toYaml .args | nindent 12 }}
+          env:
+            - name: LMCACHE_USE_EXPERIMENTAL
+              value: "True"
+            - name: LMCACHE_CONFIG_FILE
+              value: "/app/configs/lmcache_config.yaml"
+            - name: VLLM_ROCM_USE_AITER
+              value: "0"
+            {{- toYaml .env | nindent 12 }}
+          {{- if .securityContext }}
+          securityContext:
+            {{- toYaml .securityContext | nindent 12 }}
+          {{- end }}
+          image: {{ .image.repository }}:{{ .image.tag }}
+          imagePullPolicy: {{ .image.pullPolicy | default "IfNotPresent" }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          workingDir: {{ .workingDir | default "/app" }}
+          volumeMounts:
+            - name: lmcache-config
+              mountPath: /app/configs/lmcache_config.yaml
+              subPath: lmcache_config.yaml
+          {{- if (ne .readinessProbe false) }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .port | default 8000 }}
+          {{- end }}
+{{- end }}

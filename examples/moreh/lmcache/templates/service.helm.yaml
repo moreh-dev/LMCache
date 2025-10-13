@@ -1,0 +1,16 @@
+{{- range .Values.lmcache.deployList }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lmcache.fullname" $ }}-{{ .name | default "lmcache" }}-service
+  labels:
+    {{- include "lmcache.labels" (merge (dict "component" .name | default "lmcache") $) | nindent 4 }}
+spec:
+  selector:
+   {{- include "lmcache.selectorLabels" (merge (dict "component" .name | default "lmcache") $) | nindent 4 }}
+  ports:
+    - name: general
+      port: 80
+      targetPort: {{ .port | default 8000 }}
+{{- end }}

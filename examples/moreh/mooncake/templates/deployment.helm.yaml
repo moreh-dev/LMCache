@@ -15,12 +15,9 @@ spec:
       labels:
         {{- include "mooncake.labels" (tuple . "master") | nindent 8 }}
     spec:
-      {{- if .Values.mooncake.master.nodeSelectorTerms }}
+      {{- if .Values.mooncake.master.affinity }}
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              {{- toYaml .Values.mooncake.master.nodeSelectorTerms | nindent 14 }}
+        {{- toYaml .Values.mooncake.master.affinity | nindent 8 }}
       {{- end }}
       {{- if .Values.mooncake.master.tolerations }}
       tolerations:
@@ -44,8 +41,8 @@ spec:
           securityContext:
             {{- toYaml .Values.mooncake.master.securityContext | nindent 12 }}
           {{- end }}
-          image: {{.Values.mooncake.image}}
-          imagePullPolicy: {{.Values.imagePullPolicy}}
+          image: {{.Values.mooncake.image.repository}}:{{.Values.mooncake.image.tag}}
+          imagePullPolicy: {{.Values.mooncake.image.pullPolicy}}
           resources:
             {{- toYaml .Values.mooncake.master.resources | nindent 12 }}
           workingDir: {{.Values.workingDir}}
@@ -72,12 +69,9 @@ spec:
       labels:
         {{- include "mooncake.labels" (tuple . "meta") | nindent 8 }}
     spec:
-      {{- if .Values.mooncake.meta.nodeSelectorTerms }}
+      {{- if .Values.mooncake.meta.affinity }}
       affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              {{- toYaml .Values.mooncake.meta.nodeSelectorTerms | nindent 14 }}
+        {{- toYaml .Values.mooncake.meta.affinity | nindent 8 }}
       {{- end }}
       {{- if .Values.mooncake.meta.tolerations }}
       tolerations:
@@ -101,8 +95,8 @@ spec:
           securityContext:
             {{- toYaml .Values.mooncake.meta.securityContext | nindent 12 }}
           {{- end }}
-          image: {{.Values.mooncake.image}}
-          imagePullPolicy: {{.Values.imagePullPolicy}}
+          image: {{.Values.mooncake.image.repository}}:{{.Values.mooncake.image.tag}}
+          imagePullPolicy: {{.Values.mooncake.image.pullPolicy}}
           resources:
             {{- toYaml .Values.mooncake.meta.resources | nindent 12 }}
           workingDir: {{.Values.workingDir}}

@@ -1,3 +1,8 @@
+# How to use
+# echo "GITHUB_TOKEN" > github_token.txt
+# docker build --secret id=github_token,src=github_token.txt \
+#              -f Dockerfile.moreh -t [image_name] .
+
 # -----------------------
 # default base image
 ARG COMMON_WORKDIR=/app
@@ -8,8 +13,7 @@ FROM ${BASE_IMAGE} AS base
 
 # Install some basic utilities
 RUN apt-get update -q -y && apt-get install -q -y \
-    wget perl linux-headers-5.15.0-25-generic libstdc++-12-dev \
-    linux-modules-extra-5.15.0-25-generic tmux protobuf-compiler clang \
+    wget perl libstdc++-12-dev tmux protobuf-compiler clang \
     libltdl-dev dkms ethtool quilt bison \
     libnl-route-3-dev pkg-config debhelper libnl-3-200 graphviz m4 libmnl0 libfuse2 \
     autoconf lsof libnl-route-3-200 libusb-1.0-0 tk autotools-dev libnl-3-dev \
@@ -26,8 +30,8 @@ FROM base AS install_basic
 RUN wget http://www.mellanox.com/downloads/ofed/MLNX_OFED-24.10-2.1.8.0/MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64.tgz \
     && tar -xzvf MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64.tgz \
     && cd MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64 \
-    && ./mlnxofedinstall --without-fw-update --without-openmpi --without-ucx \
-       --with-nfsrdma --all -q --force --kernel 5.15.0-25-generic \
+    && ./mlnxofedinstall --force --without-fw-update --user-space-only \
+            --basic --with-perftest \
     && cd .. && rm -rf MLNX_OFED_LINUX-24.10-2.1.8.0-ubuntu22.04-x86_64*
 
 RUN wget https://github.com/openucx/ucx/releases/download/v1.18.0/ucx-1.18.0.tar.gz \
@@ -45,7 +49,7 @@ FROM base AS fetch_0
 ONBUILD COPY ./ LMCache/
 FROM base AS fetch_1
 ARG LMCACHE_REPO="https://github.com/LMCache/LMCache.git"
-ARG LMCACHE_BRANCH="v0.3.3"
+ARG LMCACHE_BRANCH="v0.3.7"
 ONBUILD RUN git clone --branch ${LMCACHE_BRANCH} --single-branch "${LMCACHE_REPO}"
 FROM fetch_${REMOTE_LMCACHE} AS fetch_lmcache
 
@@ -60,9 +64,25 @@ RUN cd LMCache && PYTORCH_ROCM_ARCH="gfx90a;gfx942" \
     BUILD_WITH_HIP=1 \
     python3 setup.py bdist_wheel --dist-dir=dist
 
+# -----------------------
+#  build nixl
+FROM install_basic AS build_nixl
+ARG COMMON_WORKDIR
+ARG NIXL_REPO="github.com/moreh-dev/nixl.git"
+
+RUN pip install build
+
+RUN --mount=type=secret,id=github_token \
+    git config --global \
+    url."https://$(cat /run/secrets/github_token):x-oauth-basic@github.com/".insteadOf \
+    "https://github.com/" \
+    && git clone --branch "0.3.0-rocm" --single-branch "https://${NIXL_REPO}" \
+    && cd nixl && python -m build --wheel
+
 FROM scratch AS export_build
 ARG COMMON_WORKDIR
 COPY --from=build_lmcache   ${COMMON_WORKDIR}/LMCache/dist/*.whl /
+COPY --from=build_nixl      ${COMMON_WORKDIR}/nixl/dist/*.whl /
 
 # -----------------------
 # Final image
@@ -72,8 +92,8 @@ FROM install_basic AS final
 RUN --mount=type=bind,from=export_build,src=/,target=/install \
     cd /install \
     && pip install *.whl
-# add mooncake for p2p sharing
-RUN pip install mooncake-transfer-engine
+# add mooncake, infinistore for sharing
+RUN pip install mooncake-transfer-engine infinistore
 
 ARG COMMON_WORKDIR
 
