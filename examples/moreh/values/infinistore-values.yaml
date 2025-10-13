@@ -12,7 +12,7 @@ infinistore:
     - -lc
   args:
     - |
-      infinistore --service-port 12345 --manage-port 18080 --dev-name mlx5_0 --link-type IB --log-level debug
+      infinistore --service-port 12345 --manage-port 18080 --dev-name mlx5_0 --link-type IB
   servicePort: 12345
   managePort: 18080
   resources:
