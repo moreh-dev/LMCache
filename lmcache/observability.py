@@ -68,6 +68,12 @@ class LMCacheStats:
     interval_local_cpu_evict_count: int  # evict count
     interval_local_cpu_evict_keys_count: int  # evict keys count
     interval_local_cpu_evict_failed_count: int  # evict failed count
+    interval_local_hit_tokens: int = 0  # local tier hit tokens
+    interval_remote_hit_tokens: int = 0  # remote tier hit tokens
+    interval_local_disk_read_bytes: int = 0
+    interval_local_disk_write_bytes: int = 0
+    local_disk_read_latencies: List[float] = field(default_factory=list)
+    local_disk_write_latencies: List[float] = field(default_factory=list)
 
     interval_forced_unpin_count: int  # forced unpin count due to timeout
 
@@ -292,6 +298,12 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_count = 0
         self.interval_local_cpu_evict_keys_count = 0
         self.interval_local_cpu_evict_failed_count = 0
+        self.interval_local_hit_tokens = 0
+        self.interval_remote_hit_tokens = 0
+        self.interval_local_disk_read_bytes = 0
+        self.interval_local_disk_write_bytes = 0
+        self.local_disk_read_latencies: List[float] = []
+        self.local_disk_write_latencies: List[float] = []
 
         self.interval_forced_unpin_count = 0
 
@@ -571,6 +583,18 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_failed_count += evict_failed_count
 
     @thread_safe
+    def record_local_disk_write(self, nbytes: int, latency_s: float):
+        """Called by LocalDiskBackend after each write."""
+        self.interval_local_disk_write_bytes += nbytes
+        self.local_disk_write_latencies.append(latency_s)
+
+    @thread_safe
+    def record_local_disk_read(self, nbytes: int, latency_s: float):
+        """Called by LocalDiskBackend after each read."""
+        self.interval_local_disk_read_bytes += nbytes
+        self.local_disk_read_latencies.append(latency_s)
+
+    @thread_safe
     def update_forced_unpin_count(self, delta: int):
         self.interval_forced_unpin_count += delta
 
@@ -626,6 +650,12 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_count = 0
         self.interval_local_cpu_evict_keys_count = 0
         self.interval_local_cpu_evict_failed_count = 0
+        self.interval_local_hit_tokens = 0
+        self.interval_remote_hit_tokens = 0
+        self.interval_local_disk_read_bytes = 0
+        self.interval_local_disk_write_bytes = 0
+        self.local_disk_read_latencies.clear()
+        self.local_disk_write_latencies.clear()
 
         self.interval_forced_unpin_count = 0
 
@@ -791,6 +821,12 @@ class LMCStatsMonitor:
             interval_local_cpu_evict_count=self.interval_local_cpu_evict_count,
             interval_local_cpu_evict_keys_count=self.interval_local_cpu_evict_keys_count,
             interval_local_cpu_evict_failed_count=self.interval_local_cpu_evict_failed_count,
+            interval_local_hit_tokens=self.interval_local_hit_tokens,
+            interval_remote_hit_tokens=self.interval_remote_hit_tokens,
+            interval_local_disk_read_bytes=self.interval_local_disk_read_bytes,
+            interval_local_disk_write_bytes=self.interval_local_disk_write_bytes,
+            local_disk_read_latencies=self.local_disk_read_latencies.copy(),
+            local_disk_write_latencies=self.local_disk_write_latencies.copy(),
             interval_forced_unpin_count=self.interval_forced_unpin_count,
             local_cache_usage_bytes=self.local_cache_usage_bytes,
             remote_cache_usage_bytes=self.remote_cache_usage_bytes,
@@ -1026,6 +1062,35 @@ class PrometheusLogger:
             name="lmcache:local_cpu_evict_failed_count",
             documentation="Total number of failed eviction in local cpu backend",
             labelnames=labelnames,
+        )
+
+        # Local disk I/O metrics (mirrors remote_* pattern)
+        self.counter_local_disk_read_bytes = self._create_counter(
+            name="lmcache:local_disk_read_bytes_total",
+            documentation="Total bytes read from local disk backend",
+            labelnames=labelnames,
+        )
+        self.counter_local_disk_write_bytes = self._create_counter(
+            name="lmcache:local_disk_write_bytes_total",
+            documentation="Total bytes written to local disk backend",
+            labelnames=labelnames,
+        )
+
+        disk_latency_buckets = [
+            0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1,
+            0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+        ]
+        self.histogram_local_disk_read_latency = self._create_histogram(
+            name="lmcache:local_disk_read_latency",
+            documentation="Local disk read latency (seconds)",
+            labelnames=labelnames,
+            buckets=disk_latency_buckets,
+        )
+        self.histogram_local_disk_write_latency = self._create_histogram(
+            name="lmcache:local_disk_write_latency",
+            documentation="Local disk write latency (seconds)",
+            labelnames=labelnames,
+            buckets=disk_latency_buckets,
         )
 
         self.counter_forced_unpin_count = self._create_counter(
@@ -1705,6 +1770,22 @@ class PrometheusLogger:
         self._log_counter(
             self.counter_local_cpu_evict_failed_count,
             stats.interval_local_cpu_evict_failed_count,
+        )
+        self._log_counter(
+            self.counter_local_disk_read_bytes,
+            stats.interval_local_disk_read_bytes,
+        )
+        self._log_counter(
+            self.counter_local_disk_write_bytes,
+            stats.interval_local_disk_write_bytes,
+        )
+        self._log_histogram(
+            self.histogram_local_disk_read_latency,
+            stats.local_disk_read_latencies,
+        )
+        self._log_histogram(
+            self.histogram_local_disk_write_latency,
+            stats.local_disk_write_latencies,
         )
         self._log_counter(
             self.counter_forced_unpin_count,

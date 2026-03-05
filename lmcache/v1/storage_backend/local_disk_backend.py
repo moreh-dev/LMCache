@@ -595,6 +595,7 @@ class LocalDiskBackend(StorageBackendInterface):
             f"Disk write size: {size} bytes, "
             f"Bandwidth: {size / disk_write_time / 1e6:.2f} MB/s"
         )
+        self.stats_monitor.record_local_disk_write(size, disk_write_time)
 
     def read_file(self, key, buffer, path):
         start_time = time.time()
@@ -625,6 +626,7 @@ class LocalDiskBackend(StorageBackendInterface):
             f"Disk read size: {size} bytes, "
             f"Bandwidth: {size / disk_read_time / 1e6:.2f} MB/s"
         )
+        self.stats_monitor.record_local_disk_read(size, disk_read_time)
 
     def get_allocator_backend(self):
         return self.local_cpu_backend
