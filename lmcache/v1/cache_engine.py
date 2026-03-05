@@ -1623,6 +1623,7 @@ class LMCacheEngine:
             block_mapping = self.storage_manager.get_block_mapping(chunk_infos)
 
         last_failed_block_start = None
+        per_backend_ranges: Dict[str, List] = {}
         for location, blocks in block_mapping.items():
             keys = [key for key, _, _ in blocks]
             memory_objs = self.storage_manager.batched_get(
@@ -1644,6 +1645,7 @@ class LMCacheEngine:
                 reordered_chunks.append((key, memory_obj, start, end))
                 tot_kv_size += memory_obj.get_size()
                 ret_mask[start:end] = True
+                per_backend_ranges.setdefault(location, []).append((start, end))
 
         if last_failed_block_start is not None:
             ret_mask[last_failed_block_start:] = False
@@ -1653,6 +1655,21 @@ class LMCacheEngine:
                 for key, memory_obj, start, end in reordered_chunks
                 if end < last_failed_block_start
             ]
+
+        # Propagate per-backend hit counts to retrieve stats
+        retrieve_stats = self.stats_monitor.get_current_retrieve_stats()
+        if retrieve_stats is not None:
+            for loc, ranges in per_backend_ranges.items():
+                if last_failed_block_start is not None:
+                    ranges = [(s, e) for s, e in ranges if e <= last_failed_block_start]
+                count = sum(e - s for s, e in ranges)
+                if loc == "LocalCPUBackend":
+                    retrieve_stats.cpu_hit_tokens = count
+                elif loc == "LocalDiskBackend":
+                    retrieve_stats.disk_hit_tokens = count
+                elif "Remote" in loc:
+                    retrieve_stats.remote_hit_tokens = count
+
         return reordered_chunks, tot_kv_size
 
     def _broadcast_or_receive_memory_objs(

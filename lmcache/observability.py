@@ -70,6 +70,8 @@ class LMCacheStats:
     interval_local_cpu_evict_failed_count: int  # evict failed count
     interval_local_hit_tokens: int = 0  # local tier hit tokens
     interval_remote_hit_tokens: int = 0  # remote tier hit tokens
+    interval_cpu_hit_tokens: int = 0    # PR4: cpu backend hit tokens
+    interval_disk_hit_tokens: int = 0   # PR4: disk backend hit tokens
     interval_local_disk_read_bytes: int = 0
     interval_local_disk_write_bytes: int = 0
     local_disk_read_latencies: List[float] = field(default_factory=list)
@@ -153,6 +155,8 @@ class RetrieveRequestStats:
     broadcast_time: float = 0
     to_gpu_time: float = 0
     detailed_metrics: Dict[str, Any] = field(default_factory=dict)
+    cpu_hit_tokens: int = 0   # PR4: per-backend hit tokens
+    disk_hit_tokens: int = 0  # PR4: per-backend hit tokens
 
     def time_to_retrieve(self):
         if self.end_time == 0:
@@ -163,7 +167,7 @@ class RetrieveRequestStats:
         if self.time_to_retrieve() == 0:
             return 0
         return (
-            self.local_hit_tokens + self.remote_hit_tokens
+            self.cpu_hit_tokens + self.disk_hit_tokens + self.remote_hit_tokens
         ) / self.time_to_retrieve()
 
     @contextmanager
@@ -301,6 +305,8 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_failed_count = 0
         self.interval_local_hit_tokens = 0
         self.interval_remote_hit_tokens = 0
+        self.interval_cpu_hit_tokens = 0
+        self.interval_disk_hit_tokens = 0
         self.interval_local_disk_read_bytes = 0
         self.interval_local_disk_write_bytes = 0
         self.local_disk_read_latencies: List[float] = []
@@ -420,6 +426,10 @@ class LMCStatsMonitor:
         if retrieve_stats.end_time == 0:
             retrieve_stats.end_time = curr_time
         self.interval_hit_tokens += num_retrieved_tokens
+        self.interval_local_hit_tokens += retrieve_stats.local_hit_tokens
+        self.interval_remote_hit_tokens += retrieve_stats.remote_hit_tokens
+        self.interval_cpu_hit_tokens += retrieve_stats.cpu_hit_tokens
+        self.interval_disk_hit_tokens += retrieve_stats.disk_hit_tokens
         self.clear_current_retrieve_stats()
 
         time_to_retrieve = retrieve_stats.time_to_retrieve()
@@ -659,6 +669,8 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_failed_count = 0
         self.interval_local_hit_tokens = 0
         self.interval_remote_hit_tokens = 0
+        self.interval_cpu_hit_tokens = 0
+        self.interval_disk_hit_tokens = 0
         self.interval_local_disk_read_bytes = 0
         self.interval_local_disk_write_bytes = 0
         self.local_disk_read_latencies.clear()
@@ -831,6 +843,8 @@ class LMCStatsMonitor:
             interval_local_cpu_evict_failed_count=self.interval_local_cpu_evict_failed_count,
             interval_local_hit_tokens=self.interval_local_hit_tokens,
             interval_remote_hit_tokens=self.interval_remote_hit_tokens,
+            interval_cpu_hit_tokens=self.interval_cpu_hit_tokens,
+            interval_disk_hit_tokens=self.interval_disk_hit_tokens,
             interval_local_disk_read_bytes=self.interval_local_disk_read_bytes,
             interval_local_disk_write_bytes=self.interval_local_disk_write_bytes,
             local_disk_read_latencies=self.local_disk_read_latencies.copy(),
@@ -1750,7 +1764,19 @@ class PrometheusLogger:
         self._log_counter(
             self.counter_num_requested_tokens, stats.interval_requested_tokens
         )
-        self._log_counter(self.counter_num_hit_tokens, stats.interval_hit_tokens)
+        # Per-tier hit token logging
+        if stats.interval_cpu_hit_tokens > 0:
+            self.counter_num_hit_tokens.labels(**self.labels, tier="cpu").inc(
+                stats.interval_cpu_hit_tokens
+            )
+        if stats.interval_disk_hit_tokens > 0:
+            self.counter_num_hit_tokens.labels(**self.labels, tier="disk").inc(
+                stats.interval_disk_hit_tokens
+            )
+        if stats.interval_remote_hit_tokens > 0:
+            self.counter_num_hit_tokens.labels(**self.labels, tier="remote").inc(
+                stats.interval_remote_hit_tokens
+            )
         self._log_counter(self.counter_num_stored_tokens, stats.interval_stored_tokens)
         self._log_counter(self.counter_num_lookup_tokens, stats.interval_lookup_tokens)
         self._log_counter(self.counter_num_lookup_hits, stats.interval_lookup_hits)
