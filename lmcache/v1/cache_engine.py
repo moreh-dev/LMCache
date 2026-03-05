@@ -1624,12 +1624,15 @@ class LMCacheEngine:
 
         last_failed_block_start = None
         per_backend_ranges: Dict[str, List] = {}
+        per_backend_get_time: Dict[str, float] = {}
         for location, blocks in block_mapping.items():
             keys = [key for key, _, _ in blocks]
+            t0 = time.perf_counter()
             memory_objs = self.storage_manager.batched_get(
                 keys=keys,
                 location=location,
             )
+            per_backend_get_time[location] = time.perf_counter() - t0
 
             for (key, start, end), memory_obj in zip(blocks, memory_objs, strict=False):
                 if memory_obj is None:
@@ -1669,6 +1672,7 @@ class LMCacheEngine:
                     retrieve_stats.disk_hit_tokens = count
                 elif "Remote" in loc:
                     retrieve_stats.remote_hit_tokens = count
+            retrieve_stats.detailed_metrics["per_backend_get_time"] = per_backend_get_time
 
         return reordered_chunks, tot_kv_size
 

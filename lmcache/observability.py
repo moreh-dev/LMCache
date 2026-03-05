@@ -72,6 +72,7 @@ class LMCacheStats:
     interval_remote_hit_tokens: int = 0  # remote tier hit tokens
     interval_cpu_hit_tokens: int = 0    # PR4: cpu backend hit tokens
     interval_disk_hit_tokens: int = 0   # PR4: disk backend hit tokens
+    per_tier_get_latencies: Dict[str, List[float]] = field(default_factory=dict)
     interval_local_disk_read_bytes: int = 0
     interval_local_disk_write_bytes: int = 0
     local_disk_read_latencies: List[float] = field(default_factory=list)
@@ -307,6 +308,7 @@ class LMCStatsMonitor:
         self.interval_remote_hit_tokens = 0
         self.interval_cpu_hit_tokens = 0
         self.interval_disk_hit_tokens = 0
+        self.per_tier_get_latencies: Dict[str, List[float]] = {"cpu": [], "disk": [], "remote": []}
         self.interval_local_disk_read_bytes = 0
         self.interval_local_disk_write_bytes = 0
         self.local_disk_read_latencies: List[float] = []
@@ -430,6 +432,15 @@ class LMCStatsMonitor:
         self.interval_remote_hit_tokens += retrieve_stats.remote_hit_tokens
         self.interval_cpu_hit_tokens += retrieve_stats.cpu_hit_tokens
         self.interval_disk_hit_tokens += retrieve_stats.disk_hit_tokens
+        # Per-tier get latency from detailed_metrics
+        per_backend_time = retrieve_stats.detailed_metrics.get("per_backend_get_time", {})
+        for backend, latency in per_backend_time.items():
+            if backend == "LocalCPUBackend":
+                self.per_tier_get_latencies["cpu"].append(latency)
+            elif backend == "LocalDiskBackend":
+                self.per_tier_get_latencies["disk"].append(latency)
+            elif "Remote" in backend:
+                self.per_tier_get_latencies["remote"].append(latency)
         self.clear_current_retrieve_stats()
 
         time_to_retrieve = retrieve_stats.time_to_retrieve()
@@ -671,6 +682,7 @@ class LMCStatsMonitor:
         self.interval_remote_hit_tokens = 0
         self.interval_cpu_hit_tokens = 0
         self.interval_disk_hit_tokens = 0
+        self.per_tier_get_latencies = {"cpu": [], "disk": [], "remote": []}
         self.interval_local_disk_read_bytes = 0
         self.interval_local_disk_write_bytes = 0
         self.local_disk_read_latencies.clear()
@@ -845,6 +857,7 @@ class LMCStatsMonitor:
             interval_remote_hit_tokens=self.interval_remote_hit_tokens,
             interval_cpu_hit_tokens=self.interval_cpu_hit_tokens,
             interval_disk_hit_tokens=self.interval_disk_hit_tokens,
+            per_tier_get_latencies={k: list(v) for k, v in self.per_tier_get_latencies.items()},
             interval_local_disk_read_bytes=self.interval_local_disk_read_bytes,
             interval_local_disk_write_bytes=self.interval_local_disk_write_bytes,
             local_disk_read_latencies=self.local_disk_read_latencies.copy(),
@@ -1120,6 +1133,18 @@ class PrometheusLogger:
             name="lmcache:local_disk_evict_count",
             documentation="Total number of evictions from local disk backend",
             labelnames=labelnames,
+        )
+
+        # Per-tier retrieve get latency histograms
+        tier_get_latency_buckets = [
+            0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1,
+            0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+        ]
+        self.histogram_tier_get_latency = self._create_histogram(
+            name="lmcache:tier_get_latency",
+            documentation="Per-tier batched_get latency (seconds)",
+            labelnames=labelnames + ["tier"],
+            buckets=tier_get_latency_buckets,
         )
 
         self.counter_forced_unpin_count = self._create_counter(
@@ -1832,6 +1857,9 @@ class PrometheusLogger:
             self.counter_local_disk_evict_count,
             stats.interval_local_disk_evict_count,
         )
+        for tier, latencies in stats.per_tier_get_latencies.items():
+            for latency in latencies:
+                self.histogram_tier_get_latency.labels(**self.labels, tier=tier).observe(latency)
         self._log_counter(
             self.counter_forced_unpin_count,
             stats.interval_forced_unpin_count,
