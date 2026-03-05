@@ -245,6 +245,7 @@ class LocalDiskBackend(StorageBackendInterface):
         # res.result()
 
         os.remove(path)
+        self.stats_monitor.update_local_disk_evict_count()
 
         if force:
             self.cache_policy.update_on_force_evict(key)
