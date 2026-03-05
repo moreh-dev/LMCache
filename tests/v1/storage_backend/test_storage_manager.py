@@ -119,7 +119,10 @@ class TestStorageManagerPrefetchCallback:
         # Create mock memory objects for all chunks
         tier0_objs = [MockMemoryObj(i) for i in range(3)]
         tier1_objs = [MockMemoryObj(i + 3) for i in range(2)]
-        res = [tier0_objs, tier1_objs]
+        res = [
+            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
+            ("LocalDiskBackend", [(f"key_{i+3}", obj) for i, obj in enumerate(tier1_objs)]),
+        ]
 
         # Create a mock future that returns the result
         loop = asyncio.new_event_loop()
@@ -159,7 +162,11 @@ class TestStorageManagerPrefetchCallback:
         tier0_objs = [MockMemoryObj(i) for i in range(3)]
         tier1_objs = [MockMemoryObj(i + 3) for i in range(1)]  # Only 1 instead of 2
         tier2_objs = [MockMemoryObj(i + 5) for i in range(2)]  # Got all 2
-        res = [tier0_objs, tier1_objs, tier2_objs]
+        res = [
+            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
+            ("LocalDiskBackend", [(f"key_{i+3}", obj) for i, obj in enumerate(tier1_objs)]),
+            ("RemoteBackend", [(f"key_{i+5}", obj) for i, obj in enumerate(tier2_objs)]),
+        ]
 
         # Create a mock future that returns the result
         loop = asyncio.new_event_loop()
@@ -207,7 +214,11 @@ class TestStorageManagerPrefetchCallback:
         tier0_objs = [MockMemoryObj(i) for i in range(2)]  # Only 2 instead of 3
         tier1_objs = [MockMemoryObj(i + 3) for i in range(2)]  # Got all 2
         tier2_objs = [MockMemoryObj(i + 5) for i in range(2)]  # Got all 2
-        res = [tier0_objs, tier1_objs, tier2_objs]
+        res = [
+            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
+            ("LocalDiskBackend", [(f"key_{i+3}", obj) for i, obj in enumerate(tier1_objs)]),
+            ("RemoteBackend", [(f"key_{i+5}", obj) for i, obj in enumerate(tier2_objs)]),
+        ]
 
         # Create a mock future that returns the result
         loop = asyncio.new_event_loop()
@@ -251,7 +262,10 @@ class TestStorageManagerPrefetchCallback:
         # All chunks retrieved successfully
         tier0_objs = [MockMemoryObj(i) for i in range(2)]
         tier1_objs = [MockMemoryObj(i + 2) for i in range(1)]
-        res = [tier0_objs, tier1_objs]
+        res = [
+            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
+            ("LocalDiskBackend", [(f"key_{i+2}", obj) for i, obj in enumerate(tier1_objs)]),
+        ]
 
         # Create a mock future that returns the result
         loop = asyncio.new_event_loop()
@@ -288,7 +302,9 @@ class TestStorageManagerPrefetchCallback:
 
         # Only got 3 chunks instead of 5
         tier0_objs = [MockMemoryObj(i) for i in range(3)]
-        res = [tier0_objs]
+        res = [
+            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
+        ]
 
         # Create a mock future that returns the result
         loop = asyncio.new_event_loop()

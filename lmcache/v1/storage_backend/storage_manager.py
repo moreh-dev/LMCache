@@ -607,7 +607,7 @@ class StorageManager:
         #   total_retrieved_chunks = 2 (stop at tier 0, all subsequent ignored)
         #   retrieved_length = cum_chunk_lengths_total[2] = 512
         total_retrieved_chunks = 0
-        for tier_idx, tier_result in enumerate(res):
+        for tier_idx, (_tier_name, tier_result) in enumerate(res):
             actual_chunks = len(tier_result)
             expected_chunks = tier_expected_chunks[tier_idx]
             total_retrieved_chunks += actual_chunks
@@ -616,8 +616,8 @@ class StorageManager:
             # because subsequent chunks are not contiguous
             if actual_chunks < expected_chunks:
                 # Release all chunks in subsequent tiers since they won't be used
-                for subsequent_tier in res[tier_idx + 1 :]:
-                    for mem_obj in subsequent_tier:
+                for _name, subsequent_tier in res[tier_idx + 1 :]:
+                    for _key, mem_obj in subsequent_tier:
                         mem_obj.ref_count_down()
                 break
 
@@ -682,6 +682,7 @@ class StorageManager:
         tier_expected_chunks = []
         # we also keep track of the keys for each tier and each chunk
         loading_task_keys: list[list[CacheEngineKey]] = []
+        tier_backend_names: list[str] = []
         for backend_name, backend in self.get_active_storage_backends(
             search_range=search_range
         ):
@@ -695,6 +696,7 @@ class StorageManager:
 
             backend_keys = keys[:num_hit_chunks]
             loading_task_keys.append(backend_keys)
+            tier_backend_names.append(backend_name)
 
             assert self.async_serializer is not None, (
                 "Async serializer must be initialized via post_init before using "
@@ -741,12 +743,12 @@ class StorageManager:
         # Tier 1:
         #  Tuple(loading_task_keys[1][0] : MemoryObj2)
         #  Tuple(loading_task_keys[1][1] : MemoryObj3)
-        async def gather_with_keys() -> list[list[tuple[CacheEngineKey, MemoryObj]]]:
+        async def gather_with_keys() -> list[tuple[str, list[tuple[CacheEngineKey, MemoryObj]]]]:
             loading_results = await asyncio.gather(*loading_tasks)
             return [
-                list(zip(keys, results, strict=False))
-                for keys, results in zip(
-                    loading_task_keys, loading_results, strict=False
+                (name, list(zip(keys, results, strict=False)))
+                for name, keys, results in zip(
+                    tier_backend_names, loading_task_keys, loading_results, strict=False
                 )
             ]
 
