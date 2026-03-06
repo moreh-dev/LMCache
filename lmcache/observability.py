@@ -70,8 +70,8 @@ class LMCacheStats:
     interval_local_cpu_evict_failed_count: int  # evict failed count
     interval_local_hit_tokens: int = 0  # local tier hit tokens
     interval_remote_hit_tokens: int = 0  # remote tier hit tokens
-    interval_cpu_hit_tokens: int = 0    # PR4: cpu backend hit tokens
-    interval_disk_hit_tokens: int = 0   # PR4: disk backend hit tokens
+    interval_cpu_hit_tokens: int = 0
+    interval_disk_hit_tokens: int = 0
     per_tier_get_latencies: Dict[str, List[float]] = field(default_factory=dict)
     interval_request_tier_served: Dict[str, int] = field(default_factory=dict)
     per_tier_request_hit_tokens: Dict[str, List[int]] = field(default_factory=dict)
@@ -158,8 +158,8 @@ class RetrieveRequestStats:
     broadcast_time: float = 0
     to_gpu_time: float = 0
     detailed_metrics: Dict[str, Any] = field(default_factory=dict)
-    cpu_hit_tokens: int = 0   # PR4: per-backend hit tokens
-    disk_hit_tokens: int = 0  # PR4: per-backend hit tokens
+    cpu_hit_tokens: int = 0
+    disk_hit_tokens: int = 0
 
     def time_to_retrieve(self):
         if self.end_time == 0:
@@ -1166,15 +1166,11 @@ class PrometheusLogger:
         )
 
         # Per-tier retrieve get latency histograms
-        tier_get_latency_buckets = [
-            0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1,
-            0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
-        ]
         self.histogram_tier_get_latency = self._create_histogram(
             name="lmcache:tier_get_latency",
             documentation="Per-tier batched_get latency (seconds)",
             labelnames=labelnames + ["tier"],
-            buckets=tier_get_latency_buckets,
+            buckets=disk_latency_buckets,
         )
 
         # Per-request tier attribution
