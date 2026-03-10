@@ -607,19 +607,31 @@ class StorageManager:
         #   total_retrieved_chunks = 2 (stop at tier 0, all subsequent ignored)
         #   retrieved_length = cum_chunk_lengths_total[2] = 512
         total_retrieved_chunks = 0
-        for tier_idx, (_tier_name, tier_result) in enumerate(res):
+        valid_res = []
+        for tier_idx, tier_result in enumerate(res):
             actual_chunks = len(tier_result)
             expected_chunks = tier_expected_chunks[tier_idx]
-            total_retrieved_chunks += actual_chunks
 
-            # If a tier retrieved fewer chunks than expected, we stop counting
-            # because subsequent chunks are not contiguous
             if actual_chunks < expected_chunks:
-                # Release all chunks in subsequent tiers since they won't be used
-                for _name, subsequent_tier in res[tier_idx + 1 :]:
+                # Release all chunks in subsequent tiers (and the current partial tier)
+                # since they won't be used
+                for subsequent_tier in res[tier_idx:]:
                     for _key, mem_obj in subsequent_tier:
                         mem_obj.ref_count_down()
                 break
+
+            total_retrieved_chunks += actual_chunks
+            valid_res.append(tier_result)
+
+            # Record per-tier hits and latency
+            # Assuming 0: CPU, 1: Disk, 2: Remote
+            tier_name = ["cpu", "disk", "remote"][min(tier_idx, 2)]
+            # Note: We can attribute hits here if we have the monitor
+            # but usually it's done in cache_engine.py or on_retrieve_finished.
+
+        # Complete the loading event with ONLY the contiguous chunks
+        # to ensure cleanup_memory_objs doesn't double-free
+        self.event_manager.complete_event(EventType.LOADING, lookup_id, valid_res)
 
         retrieved_length = cum_chunk_lengths_total[total_retrieved_chunks]
         logger.info(
@@ -743,12 +755,12 @@ class StorageManager:
         # Tier 1:
         #  Tuple(loading_task_keys[1][0] : MemoryObj2)
         #  Tuple(loading_task_keys[1][1] : MemoryObj3)
-        async def gather_with_keys() -> list[tuple[str, list[tuple[CacheEngineKey, MemoryObj]]]]:
+        async def gather_with_keys() -> list[list[tuple[CacheEngineKey, MemoryObj]]]:
             loading_results = await asyncio.gather(*loading_tasks)
             return [
-                (name, list(zip(keys, results, strict=False)))
-                for name, keys, results in zip(
-                    tier_backend_names, loading_task_keys, loading_results, strict=False
+                list(zip(keys, results, strict=False))
+                for keys, results in zip(
+                    loading_task_keys, loading_results, strict=False
                 )
             ]
 

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Standard
 from unittest.mock import MagicMock
+import time
 
 # Third Party
 import pytest
@@ -142,12 +143,15 @@ def test_remote_ping_errors(stats_monitor):
 def test_retrieve_and_store_speed(stats_monitor):
     # Test retrieve speed calculation
     stats_obj_retrieve = stats_monitor.on_retrieve_request(num_tokens=1000)
+    time.sleep(0.001)
+    stats_obj_retrieve.cpu_hit_tokens = 1000
     stats_monitor.on_retrieve_finished(
         retrieve_stats=stats_obj_retrieve, num_retrieved_tokens=1000
     )
 
     # Test store speed calculation
     stats_obj_store = stats_monitor.on_store_request(num_tokens=500)
+    time.sleep(0.001)
     stats_monitor.on_store_finished(store_stats=stats_obj_store)
 
     stats = stats_monitor.get_stats_and_clear()

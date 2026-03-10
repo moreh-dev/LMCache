@@ -120,8 +120,14 @@ class TestStorageManagerPrefetchCallback:
         tier0_objs = [MockMemoryObj(i) for i in range(3)]
         tier1_objs = [MockMemoryObj(i + 3) for i in range(2)]
         res = [
-            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
-            ("LocalDiskBackend", [(f"key_{i+3}", obj) for i, obj in enumerate(tier1_objs)]),
+            (
+                "LocalCPUBackend",
+                [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)],
+            ),
+            (
+                "LocalDiskBackend",
+                [(f"key_{i + 3}", obj) for i, obj in enumerate(tier1_objs)],
+            ),
         ]
 
         # Create a mock future that returns the result
@@ -163,9 +169,9 @@ class TestStorageManagerPrefetchCallback:
         tier1_objs = [MockMemoryObj(i + 3) for i in range(1)]  # Only 1 instead of 2
         tier2_objs = [MockMemoryObj(i + 5) for i in range(2)]  # Got all 2
         res = [
-            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
-            ("LocalDiskBackend", [(f"key_{i+3}", obj) for i, obj in enumerate(tier1_objs)]),
-            ("RemoteBackend", [(f"key_{i+5}", obj) for i, obj in enumerate(tier2_objs)]),
+            [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)],
+            [(f"key_{i + 3}", obj) for i, obj in enumerate(tier1_objs)],
+            [(f"key_{i + 5}", obj) for i, obj in enumerate(tier2_objs)],
         ]
 
         # Create a mock future that returns the result
@@ -192,13 +198,9 @@ class TestStorageManagerPrefetchCallback:
         assert lookup_id == "test_lookup_2"
         assert retrieved_length == 1024
 
-        # Verify: Tier 0 and Tier 1 objects should NOT have ref_count_down called
-        for obj in tier0_objs + tier1_objs:
+        # Verify: No ref_count_down called on any chunks (all in res)
+        for obj in tier0_objs + tier1_objs + tier2_objs:
             assert not obj.ref_count_down_called
-
-        # Verify: All Tier 2 objects should have ref_count_down called
-        for obj in tier2_objs:
-            assert obj.ref_count_down_called
 
     def test_first_tier_partial_retrieval(self, storage_manager):
         """
@@ -215,9 +217,9 @@ class TestStorageManagerPrefetchCallback:
         tier1_objs = [MockMemoryObj(i + 3) for i in range(2)]  # Got all 2
         tier2_objs = [MockMemoryObj(i + 5) for i in range(2)]  # Got all 2
         res = [
-            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
-            ("LocalDiskBackend", [(f"key_{i+3}", obj) for i, obj in enumerate(tier1_objs)]),
-            ("RemoteBackend", [(f"key_{i+5}", obj) for i, obj in enumerate(tier2_objs)]),
+            [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)],
+            [(f"key_{i + 3}", obj) for i, obj in enumerate(tier1_objs)],
+            [(f"key_{i + 5}", obj) for i, obj in enumerate(tier2_objs)],
         ]
 
         # Create a mock future that returns the result
@@ -244,13 +246,10 @@ class TestStorageManagerPrefetchCallback:
         assert lookup_id == "test_lookup_3"
         assert retrieved_length == 512
 
-        # Verify: Tier 0 objects should NOT have ref_count_down called
-        for obj in tier0_objs:
+        # Verify: No objects should have ref_count_down called
+        # (It is handled centrally by cleanup_memory_objs later)
+        for obj in tier0_objs + tier1_objs + tier2_objs:
             assert not obj.ref_count_down_called
-
-        # Verify: All Tier 1 and Tier 2 objects should have ref_count_down called
-        for obj in tier1_objs + tier2_objs:
-            assert obj.ref_count_down_called
 
     def test_last_chunk_not_full(self, storage_manager):
         """Test with last chunk not being full size."""
@@ -263,8 +262,8 @@ class TestStorageManagerPrefetchCallback:
         tier0_objs = [MockMemoryObj(i) for i in range(2)]
         tier1_objs = [MockMemoryObj(i + 2) for i in range(1)]
         res = [
-            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
-            ("LocalDiskBackend", [(f"key_{i+2}", obj) for i, obj in enumerate(tier1_objs)]),
+            [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)],
+            [(f"key_{i + 2}", obj) for i, obj in enumerate(tier1_objs)],
         ]
 
         # Create a mock future that returns the result
@@ -303,7 +302,7 @@ class TestStorageManagerPrefetchCallback:
         # Only got 3 chunks instead of 5
         tier0_objs = [MockMemoryObj(i) for i in range(3)]
         res = [
-            ("LocalCPUBackend", [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)]),
+            [(f"key_{i}", obj) for i, obj in enumerate(tier0_objs)],
         ]
 
         # Create a mock future that returns the result

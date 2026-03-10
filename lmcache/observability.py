@@ -68,7 +68,6 @@ class LMCacheStats:
     interval_local_cpu_evict_count: int  # evict count
     interval_local_cpu_evict_keys_count: int  # evict keys count
     interval_local_cpu_evict_failed_count: int  # evict failed count
-    interval_local_hit_tokens: int = 0  # local tier hit tokens
     interval_remote_hit_tokens: int = 0  # remote tier hit tokens
     interval_cpu_hit_tokens: int = 0
     interval_disk_hit_tokens: int = 0
@@ -123,7 +122,9 @@ class LMCacheStats:
     interval_lookup_hit_rates: List[float] = field(default_factory=list)
     interval_lookup_0_hit_requests: int = 0
 
-    interval_request_cache_lifespan: List[float] = field(default_factory=list)  # cache lifespan in minutes
+    interval_request_cache_lifespan: List[float] = field(
+        default_factory=list
+    )  # cache lifespan in minutes
 
 
 @dataclass
@@ -306,13 +307,26 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_count = 0
         self.interval_local_cpu_evict_keys_count = 0
         self.interval_local_cpu_evict_failed_count = 0
-        self.interval_local_hit_tokens = 0
         self.interval_remote_hit_tokens = 0
         self.interval_cpu_hit_tokens = 0
         self.interval_disk_hit_tokens = 0
-        self.per_tier_get_latencies: Dict[str, List[float]] = {"cpu": [], "disk": [], "remote": []}
-        self.interval_request_tier_served: Dict[str, int] = {"cpu": 0, "disk": 0, "remote": 0, "mixed": 0, "miss": 0}
-        self.per_tier_request_hit_tokens: Dict[str, List[int]] = {"cpu": [], "disk": [], "remote": []}
+        self.per_tier_get_latencies: Dict[str, List[float]] = {
+            "cpu": [],
+            "disk": [],
+            "remote": [],
+        }
+        self.interval_request_tier_served: Dict[str, int] = {
+            "cpu": 0,
+            "disk": 0,
+            "remote": 0,
+            "mixed": 0,
+            "miss": 0,
+        }
+        self.per_tier_request_hit_tokens: Dict[str, List[int]] = {
+            "cpu": [],
+            "disk": [],
+            "remote": [],
+        }
         self.interval_local_disk_read_bytes = 0
         self.interval_local_disk_write_bytes = 0
         self.local_disk_read_latencies: List[float] = []
@@ -432,12 +446,13 @@ class LMCStatsMonitor:
         if retrieve_stats.end_time == 0:
             retrieve_stats.end_time = curr_time
         self.interval_hit_tokens += num_retrieved_tokens
-        self.interval_local_hit_tokens += retrieve_stats.local_hit_tokens
         self.interval_remote_hit_tokens += retrieve_stats.remote_hit_tokens
         self.interval_cpu_hit_tokens += retrieve_stats.cpu_hit_tokens
         self.interval_disk_hit_tokens += retrieve_stats.disk_hit_tokens
         # Per-tier get latency from detailed_metrics
-        per_backend_time = retrieve_stats.detailed_metrics.get("per_backend_get_time", {})
+        per_backend_time = retrieve_stats.detailed_metrics.get(
+            "per_backend_get_time", {}
+        )
         for backend, latency in per_backend_time.items():
             if backend == "LocalCPUBackend":
                 self.per_tier_get_latencies["cpu"].append(latency)
@@ -445,18 +460,17 @@ class LMCStatsMonitor:
                 self.per_tier_get_latencies["disk"].append(latency)
             elif "Remote" in backend:
                 self.per_tier_get_latencies["remote"].append(latency)
-        # Per-request tier attribution
         cpu = retrieve_stats.cpu_hit_tokens
         disk = retrieve_stats.disk_hit_tokens
         remote = retrieve_stats.remote_hit_tokens
         total = cpu + disk + remote
         if total == 0:
             self.interval_request_tier_served["miss"] += 1
-        elif cpu >= disk and cpu >= remote and cpu > total * 0.5:
+        elif cpu > total * 0.5:
             self.interval_request_tier_served["cpu"] += 1
-        elif disk >= cpu and disk >= remote and disk > total * 0.5:
+        elif disk > total * 0.5:
             self.interval_request_tier_served["disk"] += 1
-        elif remote >= cpu and remote >= disk and remote > total * 0.5:
+        elif remote > total * 0.5:
             self.interval_request_tier_served["remote"] += 1
         else:
             self.interval_request_tier_served["mixed"] += 1
@@ -704,12 +718,17 @@ class LMCStatsMonitor:
         self.interval_local_cpu_evict_count = 0
         self.interval_local_cpu_evict_keys_count = 0
         self.interval_local_cpu_evict_failed_count = 0
-        self.interval_local_hit_tokens = 0
         self.interval_remote_hit_tokens = 0
         self.interval_cpu_hit_tokens = 0
         self.interval_disk_hit_tokens = 0
         self.per_tier_get_latencies = {"cpu": [], "disk": [], "remote": []}
-        self.interval_request_tier_served = {"cpu": 0, "disk": 0, "remote": 0, "mixed": 0, "miss": 0}
+        self.interval_request_tier_served = {
+            "cpu": 0,
+            "disk": 0,
+            "remote": 0,
+            "mixed": 0,
+            "miss": 0,
+        }
         self.per_tier_request_hit_tokens = {"cpu": [], "disk": [], "remote": []}
         self.interval_local_disk_read_bytes = 0
         self.interval_local_disk_write_bytes = 0
@@ -881,13 +900,16 @@ class LMCStatsMonitor:
             interval_local_cpu_evict_count=self.interval_local_cpu_evict_count,
             interval_local_cpu_evict_keys_count=self.interval_local_cpu_evict_keys_count,
             interval_local_cpu_evict_failed_count=self.interval_local_cpu_evict_failed_count,
-            interval_local_hit_tokens=self.interval_local_hit_tokens,
             interval_remote_hit_tokens=self.interval_remote_hit_tokens,
             interval_cpu_hit_tokens=self.interval_cpu_hit_tokens,
             interval_disk_hit_tokens=self.interval_disk_hit_tokens,
-            per_tier_get_latencies={k: list(v) for k, v in self.per_tier_get_latencies.items()},
+            per_tier_get_latencies={
+                k: list(v) for k, v in self.per_tier_get_latencies.items()
+            },
             interval_request_tier_served=dict(self.interval_request_tier_served),
-            per_tier_request_hit_tokens={k: list(v) for k, v in self.per_tier_request_hit_tokens.items()},
+            per_tier_request_hit_tokens={
+                k: list(v) for k, v in self.per_tier_request_hit_tokens.items()
+            },
             interval_local_disk_read_bytes=self.interval_local_disk_read_bytes,
             interval_local_disk_write_bytes=self.interval_local_disk_write_bytes,
             local_disk_read_latencies=self.local_disk_read_latencies.copy(),
@@ -1051,7 +1073,7 @@ class PrometheusLogger:
         self.counter_num_hit_tokens = self._create_counter(
             name="lmcache:num_hit_tokens",
             documentation="Total number of tokens hit in lmcache",
-            labelnames=labelnames,
+            labelnames=labelnames + ["tier"],
         )
 
         self.counter_num_stored_tokens = self._create_counter(
@@ -1130,7 +1152,6 @@ class PrometheusLogger:
             labelnames=labelnames,
         )
 
-        # Local disk I/O metrics (mirrors remote_* pattern)
         self.counter_local_disk_read_bytes = self._create_counter(
             name="lmcache:local_disk_read_bytes_total",
             documentation="Total bytes read from local disk backend",
@@ -1142,21 +1163,32 @@ class PrometheusLogger:
             labelnames=labelnames,
         )
 
-        disk_latency_buckets = [
-            0.001, 0.005, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1,
-            0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+        self.disk_latency_buckets = [
+            0.001,
+            0.002,
+            0.005,
+            0.01,
+            0.02,
+            0.05,
+            0.1,
+            0.2,
+            0.5,
+            1.0,
+            2.0,
+            5.0,
+            10.0,
         ]
         self.histogram_local_disk_read_latency = self._create_histogram(
             name="lmcache:local_disk_read_latency",
             documentation="Local disk read latency (seconds)",
             labelnames=labelnames,
-            buckets=disk_latency_buckets,
+            buckets=self.disk_latency_buckets,
         )
         self.histogram_local_disk_write_latency = self._create_histogram(
             name="lmcache:local_disk_write_latency",
             documentation="Local disk write latency (seconds)",
             labelnames=labelnames,
-            buckets=disk_latency_buckets,
+            buckets=self.disk_latency_buckets,
         )
 
         self.counter_local_disk_evict_count = self._create_counter(
@@ -1165,15 +1197,13 @@ class PrometheusLogger:
             labelnames=labelnames,
         )
 
-        # Per-tier retrieve get latency histograms
         self.histogram_tier_get_latency = self._create_histogram(
             name="lmcache:tier_get_latency",
             documentation="Per-tier batched_get latency (seconds)",
             labelnames=labelnames + ["tier"],
-            buckets=disk_latency_buckets,
+            buckets=self.disk_latency_buckets,
         )
 
-        # Per-request tier attribution
         self.counter_request_tier_served = self._create_counter(
             name="lmcache:request_tier_served",
             documentation="Number of retrieve requests served by each tier",
@@ -1828,7 +1858,6 @@ class PrometheusLogger:
         self._log_counter(
             self.counter_num_requested_tokens, stats.interval_requested_tokens
         )
-        # Per-tier hit token logging
         if stats.interval_cpu_hit_tokens > 0:
             self.counter_num_hit_tokens.labels(**self.labels, tier="cpu").inc(
                 stats.interval_cpu_hit_tokens
@@ -1898,13 +1927,19 @@ class PrometheusLogger:
         )
         for tier, latencies in stats.per_tier_get_latencies.items():
             for latency in latencies:
-                self.histogram_tier_get_latency.labels(**self.labels, tier=tier).observe(latency)
+                self.histogram_tier_get_latency.labels(
+                    **self.labels, tier=tier
+                ).observe(latency)
         for tier, count in stats.interval_request_tier_served.items():
             if count > 0:
-                self.counter_request_tier_served.labels(**self.labels, tier=tier).inc(count)
+                self.counter_request_tier_served.labels(**self.labels, tier=tier).inc(
+                    count
+                )
         for tier, tokens_list in stats.per_tier_request_hit_tokens.items():
             for tokens in tokens_list:
-                self.histogram_request_tier_hit_tokens.labels(**self.labels, tier=tier).observe(tokens)
+                self.histogram_request_tier_hit_tokens.labels(
+                    **self.labels, tier=tier
+                ).observe(tokens)
         self._log_counter(
             self.counter_forced_unpin_count,
             stats.interval_forced_unpin_count,

@@ -757,3 +757,18 @@ class NixlStoreL2Adapter(L2AdapterInterface):
         with self._lock:
             self._completed_load_tasks[task_id] = bitmap
         self._signal_load_event()
+
+    def report_status(self) -> dict:
+        """
+        Return a status dict for this adapter.
+        """
+        with self._lock:
+            return {
+                "is_healthy": True,
+                "type": "NixlStoreL2Adapter",
+                "backend": self._config.backend,
+                "stored_object_count": len(self._memory_objects),
+                "completed_store_tasks": len(self._completed_store_tasks),
+                "completed_lookup_tasks": len(self._completed_lookup_tasks),
+                "completed_load_tasks": len(self._completed_load_tasks),
+            }

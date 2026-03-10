@@ -1020,7 +1020,6 @@ class LMCacheEngine:
         next(mem_obj_consumer)
 
         retrieved_tokens = torch.sum(ret_mask)
-        # Set per-tier hit tokens based on which backend served this request
         if location is not None:
             total = int(retrieved_tokens)
             if location == "LocalCPUBackend":
@@ -1291,17 +1290,17 @@ class LMCacheEngine:
 
             # Get memory objects from the future result
             memory_objs = future.result()
-            # Flatten nested lists (each backend returns (name, [(key, memobj)]))
-            memory_objs_flat = [mm for _name, m in memory_objs for mm in m]
-
             # Release each memory object
-            for _key, memory_obj in memory_objs_flat:
-                try:
-                    logger.debug("Releasing memory object for lookup_id=%s", lookup_id)
-                    memory_obj.unpin()
-                    memory_obj.ref_count_down()
-                except Exception as e:
-                    logger.error(f"Error releasing memory object: {e}")
+            for tier_objs in memory_objs:
+                for _key, memory_obj in tier_objs:
+                    try:
+                        logger.debug(
+                            "Releasing memory object for lookup_id=%s", lookup_id
+                        )
+                        memory_obj.unpin()
+                        memory_obj.ref_count_down()
+                    except Exception as e:
+                        logger.error(f"Error releasing memory object: {e}")
         except Exception as e:
             logger.error(
                 f"Error during cleanup_memory_objs for lookup_id={lookup_id}: {e}"
@@ -1558,8 +1557,12 @@ class LMCacheEngine:
             logger.error(f"Error popping event for request {kwargs['req_id']}: {e}")
             return [], 0
 
-        for backend_name, backend_results in keyed_memory_objs:
-            for key, memory_obj in backend_results:
+        for tier_idx, tier_results in enumerate(keyed_memory_objs):
+            # Assuming 0: CPU, 1: Disk, 2: Remote
+            backend_name = ["LocalCPUBackend", "LocalDiskBackend", "RemoteBackend"][
+                min(tier_idx, 2)
+            ]
+            for key, memory_obj in tier_results:
                 memory_obj_map[key] = memory_obj
                 key_to_backend[key] = backend_name
 
@@ -1586,13 +1589,14 @@ class LMCacheEngine:
             if key not in used_keys:
                 mem_obj.ref_count_down()
 
-        # Propagate per-backend hit counts to retrieve stats
         retrieve_stats = self.stats_monitor.get_current_retrieve_stats()
         if retrieve_stats is not None:
             per_backend_tokens: Dict[str, int] = {}
             for key, _memory_obj, start, end in chunks:
                 backend = key_to_backend.get(key, "unknown")
-                per_backend_tokens[backend] = per_backend_tokens.get(backend, 0) + (end - start)
+                per_backend_tokens[backend] = per_backend_tokens.get(backend, 0) + (
+                    end - start
+                )
             for backend, count in per_backend_tokens.items():
                 if backend == "LocalCPUBackend":
                     retrieve_stats.cpu_hit_tokens = count
@@ -1685,7 +1689,6 @@ class LMCacheEngine:
                 if end < last_failed_block_start
             ]
 
-        # Propagate per-backend hit counts to retrieve stats
         retrieve_stats = self.stats_monitor.get_current_retrieve_stats()
         if retrieve_stats is not None:
             for loc, ranges in per_backend_ranges.items():
@@ -1698,7 +1701,9 @@ class LMCacheEngine:
                     retrieve_stats.disk_hit_tokens = count
                 elif "Remote" in loc:
                     retrieve_stats.remote_hit_tokens = count
-            retrieve_stats.detailed_metrics["per_backend_get_time"] = per_backend_get_time
+            retrieve_stats.detailed_metrics["per_backend_get_time"] = (
+                per_backend_get_time
+            )
 
         return reordered_chunks, tot_kv_size
 
