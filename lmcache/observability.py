@@ -81,49 +81,49 @@ class LMCacheStats:
     local_disk_write_latencies: List[float] = field(default_factory=list)
     interval_local_disk_evict_count: int = 0
 
-    interval_forced_unpin_count: int  # forced unpin count due to timeout
+    interval_forced_unpin_count: int = 0  # forced unpin count due to timeout
 
     # Real time value measurements (will be reset after each log)
-    retrieve_hit_rate: float
-    lookup_hit_rate: float
+    retrieve_hit_rate: float = 0.0
+    lookup_hit_rate: float = 0.0
 
-    local_cache_usage_bytes: int  # Size of the used local cache in bytes
-    remote_cache_usage_bytes: int  # Size of the used remote cache in bytes
-    local_storage_usage_bytes: int  # Size of the used local storage in bytes
+    local_cache_usage_bytes: int = 0  # Size of the used local cache in bytes
+    remote_cache_usage_bytes: int = 0  # Size of the used remote cache in bytes
+    local_storage_usage_bytes: int = 0  # Size of the used local storage in bytes
 
-    active_memory_objs_count: int  # the number of active memory objects
-    pinned_memory_objs_count: int  # the number of pinned memory objects
+    active_memory_objs_count: int = 0  # the number of active memory objects
+    pinned_memory_objs_count: int = 0  # the number of pinned memory objects
 
     # Distribution measurements
-    time_to_retrieve: List[float]
-    time_to_store: List[float]
-    time_to_lookup: List[float]
-    retrieve_speed: List[float]  # Tokens per second
-    store_speed: List[float]  # Tokens per second
+    time_to_retrieve: List[float] = field(default_factory=list)
+    time_to_store: List[float] = field(default_factory=list)
+    time_to_lookup: List[float] = field(default_factory=list)
+    retrieve_speed: List[float] = field(default_factory=list)  # Tokens per second
+    store_speed: List[float] = field(default_factory=list)  # Tokens per second
 
     # Granular profiling measurements
-    retrieve_process_tokens_time: List[float]
-    retrieve_broadcast_time: List[float]
-    retrieve_to_gpu_time: List[float]
-    remote_backend_batched_get_blocking_time: List[float]
-    instrumented_connector_batched_get_time: List[float]
-    store_process_tokens_time: List[float]
-    store_from_gpu_time: List[float]
-    store_put_time: List[float]
+    retrieve_process_tokens_time: List[float] = field(default_factory=list)
+    retrieve_broadcast_time: List[float] = field(default_factory=list)
+    retrieve_to_gpu_time: List[float] = field(default_factory=list)
+    remote_backend_batched_get_blocking_time: List[float] = field(default_factory=list)
+    instrumented_connector_batched_get_time: List[float] = field(default_factory=list)
+    store_process_tokens_time: List[float] = field(default_factory=list)
+    store_from_gpu_time: List[float] = field(default_factory=list)
+    store_put_time: List[float] = field(default_factory=list)
 
     # P2P transfer metrics
-    interval_p2p_requests: int
-    interval_p2p_transferred_tokens: int
-    p2p_time_to_transfer: List[float]
-    p2p_transfer_speed: List[float]  # Tokens per second
+    interval_p2p_requests: int = 0
+    interval_p2p_transferred_tokens: int = 0
+    p2p_time_to_transfer: List[float] = field(default_factory=list)
+    p2p_transfer_speed: List[float] = field(default_factory=list)  # Tokens per second
 
     # request lookup hit rates
     # use bucket of interval_lookup_hit_rates to represents non-0 hit requests
     # use interval_lookup_0_hit_requests to represents 0 hit requests
-    interval_lookup_hit_rates: List[float]
-    interval_lookup_0_hit_requests: int
+    interval_lookup_hit_rates: List[float] = field(default_factory=list)
+    interval_lookup_0_hit_requests: int = 0
 
-    interval_request_cache_lifespan: List[float]  # cache lifespan in minutes
+    interval_request_cache_lifespan: List[float] = field(default_factory=list)  # cache lifespan in minutes
 
 
 @dataclass
