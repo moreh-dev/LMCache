@@ -9,6 +9,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1,
     KVConnectorMetadata,
     KVConnectorRole,
+    SupportsHMA,
 )
 from vllm.logger import init_logger
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
-class LMCacheConnectorV1Dynamic(KVConnectorBase_V1):
+class LMCacheConnectorV1Dynamic(KVConnectorBase_V1, SupportsHMA):
     def __init__(
         self,
         vllm_config: "VllmConfig",
@@ -211,3 +212,18 @@ class LMCacheConnectorV1Dynamic(KVConnectorBase_V1):
             returned by the engine.
         """
         return self._lmcache_engine.request_finished(request, block_ids)
+
+    def request_finished_all_groups(
+        self,
+        request: "Request",
+        block_ids: tuple[list[int], ...],
+    ) -> tuple[bool, Optional[dict[str, Any]]]:
+        """HMA support: handle multi-group KV cache (Full Attention + SWA).
+
+        For hybrid attention models (e.g. gpt-oss-20b/120b with 50% Full + 50% SWA):
+        - block_ids[0] = Full Attention group blocks (cache in LMCache)
+        - block_ids[1] = Sliding Window group blocks (skip, SWA recompute is cheap)
+
+        This prevents the 2x KV memory waste caused by HMA being disabled.
+        """
+        return self.request_finished(request, block_ids[0])
