@@ -218,12 +218,26 @@ class LMCacheConnectorV1Dynamic(KVConnectorBase_V1, SupportsHMA):
         request: "Request",
         block_ids: tuple[list[int], ...],
     ) -> tuple[bool, Optional[dict[str, Any]]]:
-        """HMA support: handle multi-group KV cache (Full Attention + SWA).
+        """HMA support: handle multi-group KV cache for hybrid attention models.
 
-        For hybrid attention models (e.g. gpt-oss-20b/120b with 50% Full + 50% SWA):
-        - block_ids[0] = Full Attention group blocks (cache in LMCache)
-        - block_ids[1] = Sliding Window group blocks (skip, SWA recompute is cheap)
+        When vLLM's Hybrid Memory Allocator (HMA) is enabled, block_ids is a
+        tuple with one list per KV cache group. Different architectures produce
+        different group layouts:
 
-        This prevents the 2x KV memory waste caused by HMA being disabled.
+        - Qwen3.5 (GatedDeltaNet + GatedAttention):
+          block_ids[0] = GatedAttention (standard KV, 25% of layers)
+          block_ids[1] = GatedDeltaNet (linear attention state, 75%)
+        - Models with Full + SWA (sliding window attention):
+          block_ids[0] = Full Attention group blocks
+          block_ids[1] = Sliding Window group blocks
+
+        We delegate to group 0 only, which contains the standard KV cache
+        entries that LMCache can store and retrieve. Non-standard state
+        (linear attention, SWA) is cheap to recompute and not cached.
+
+        Without this method, vLLM unconditionally disables HMA when a KV
+        connector is configured, forcing all layers to use the same KV spec
+        and wasting GPU memory (e.g. 2x for 50/50 Full+SWA models, or
+        allocating full KV for linear attention layers that don't need it).
         """
         return self.request_finished(request, block_ids[0])
