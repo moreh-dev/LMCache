@@ -173,6 +173,14 @@ class KVLayerGroupsManager:
         )
 
         for idx, (layer_name, kv_cache) in enumerate(kv_caches.items()):
+            if not isinstance(kv_cache, torch.Tensor):
+                logger.debug(
+                    "Skipping non-tensor KV cache entry '%s' (type=%s); "
+                    "likely a Mamba/linear-attention layer",
+                    layer_name,
+                    type(kv_cache).__name__,
+                )
+                continue
             shape = kv_cache.shape
             dtype = kv_cache.dtype
             key = (shape, dtype)
