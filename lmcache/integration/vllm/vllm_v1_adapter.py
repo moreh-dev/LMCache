@@ -728,12 +728,18 @@ class LMCacheConnectorV1Impl:
     # Worker side APIs
     ####################
     @_lmcache_nvtx_annotate
-    def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]):
+    def register_kv_caches(
+        self, kv_caches: dict[str, Union[torch.Tensor, list[torch.Tensor]]]
+    ):
         logger.info("Registering KV caches")
         # TODO(chunxiaozheng): `_init_kv_caches_from_forward_context` is
         #  not called, we should consider removing it.
         assert len(self.kv_caches) == 0 and len(kv_caches) > 0
-        self.kv_caches = kv_caches
+        # Filter to tensor-only entries for LMCache operations;
+        # non-tensor entries (e.g. Mamba/linear-attention lists) are skipped.
+        self.kv_caches = {
+            k: v for k, v in kv_caches.items() if isinstance(v, torch.Tensor)
+        }
         self._build_kv_layer_groups()
         self._manager.post_init()
 
