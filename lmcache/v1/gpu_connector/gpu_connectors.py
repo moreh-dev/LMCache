@@ -224,9 +224,40 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
         idx = self.device.index
         if idx in self.kv_cache_pointers_on_gpu:
             return self.kv_cache_pointers_on_gpu[idx]
+        # kv_caches may contain only a subset of layers (TP split or hybrid
+        # architectures where non-tensor layers are filtered out).  Update
+        # num_layers AND gpu_buffer together so they stay consistent with the
+        # memory_obj shapes produced by kv_layer_groups.
+        actual_layers = len(kv_caches)
+        if actual_layers != self.kv_cache_pointers.shape[0]:
+            logger.debug(
+                "kv_cache_pointers resized from %d to %d",
+                self.kv_cache_pointers.shape[0],
+                actual_layers,
+            )
+            self.kv_cache_pointers = torch.empty(
+                actual_layers, dtype=torch.int64, device="cpu"
+            )
+        # Sync num_layers and gpu_buffer when the actual layer count differs
+        # (e.g. hybrid arch like Qwen3.5 where only attention layers have KV).
+        if actual_layers != self.num_layers:
+            logger.info(
+                "Updating num_layers %d -> %d and rebuilding gpu_buffer "
+                "(hybrid architecture detected)",
+                self.num_layers,
+                actual_layers,
+            )
+            self.num_layers = actual_layers
+            if self.gpu_buffer is not None:
+                chunk_size = self.gpu_buffer.shape[2]
+                self.gpu_buffer = torch.empty(
+                    self.get_shape(chunk_size),
+                    dtype=self.gpu_buffer.dtype,
+                    device=self.gpu_buffer.device,
+                )
         self.kv_cache_pointers.numpy()[:] = [t.data_ptr() for t in kv_caches]
         self.kv_cache_pointers_on_gpu[idx] = torch.empty(
-            self.num_layers, dtype=torch.int64, device=self.device
+            actual_layers, dtype=torch.int64, device=self.device
         )
         self.kv_cache_pointers_on_gpu[idx].copy_(self.kv_cache_pointers)
 
