@@ -79,6 +79,21 @@ More [detailed installation instructions](https://docs.lmcache.ai/getting_starte
 
 The best way to get started is to checkout the [Quickstart Examples](https://docs.lmcache.ai/getting_started/quickstart/) in the docs.
 
+### Hybrid Qwen3.5 + vLLM v1 note
+
+When validating LMCache with hybrid Mamba+attention models such as Qwen3.5 on
+vLLM v1/v0.17.x, the installed vLLM scheduler may reject
+`num_external_computed_tokens > 0` inside the Mamba split path. In that case,
+apply the helper in this repo before starting vLLM:
+
+```bash
+python3 scripts/patch_vllm_scheduler_hybrid_external_v017.py
+```
+
+This is an external vLLM patch, not an LMCache source patch. It is intended for
+hybrid-architecture validation paths and should be paired with the relevant
+LMCache/vLLM integration patches for that stack.
+
 ## Documentation
 
 Check out the LMCache [documentation](https://docs.lmcache.ai/) which is available online.

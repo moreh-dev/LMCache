@@ -740,6 +740,20 @@ class LMCacheConnectorV1Impl:
         self.kv_caches = {
             k: v for k, v in kv_caches.items() if isinstance(v, torch.Tensor)
         }
+        actual_layers = len(self.kv_caches)
+        if actual_layers != self.num_layers:
+            logger.warning(
+                "LMCache hybrid-safe correction: num_layers %d -> %d",
+                self.num_layers,
+                actual_layers,
+            )
+            self.num_layers = actual_layers
+            if self.lmcache_engine is not None and hasattr(self.lmcache_engine, "num_layers"):
+                self.lmcache_engine.num_layers = actual_layers
+            if self.lmcache_engine is not None and hasattr(self.lmcache_engine, "metadata"):
+                kv_shape = list(self.lmcache_engine.metadata.kv_shape)
+                kv_shape[0] = actual_layers
+                self.lmcache_engine.metadata.kv_shape = tuple(kv_shape)
         self._build_kv_layer_groups()
         self._manager.post_init()
 
