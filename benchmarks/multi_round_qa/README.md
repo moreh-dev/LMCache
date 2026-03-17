@@ -125,3 +125,27 @@ The `multi_round_qa.py` script works by:
         --sharegpt
     ```
 
+
+    ```bash
+    python3 multi-round-qa-v2.py \
+        --num-users 32 \
+        --shared-system-prompt 2000 \
+        --user-history-prompt 8000 \
+        --answer-len 512 \
+        --num-rounds 30 \
+        --gap-mean 5 \
+        --gap-std 0 \
+        --shared-prefix-ratio 0.3 \
+        --context-file man-bash.txt \
+        --model /remote/vast0/share/model/GLM-4.5-Air \
+        --base-url http://localhost:8000/v1 \
+        --time 900 \
+        --output results/summary.csv \
+        --monitor-log results/monitor.jsonl \
+        --metrics-log results/metrics.jsonl \
+        --metrics-url http://localhost:8000/metrics \
+        --metrics-interval 5 \
+        --request-with-user-id \
+        --enforce-strict-concurrent-users \
+        --no-plot
+    ```
