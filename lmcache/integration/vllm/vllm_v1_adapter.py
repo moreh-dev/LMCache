@@ -379,17 +379,15 @@ class ReqMeta:
         num_blocks = len(tracker.allocated_block_ids)
 
         if len(token_ids) > num_blocks * block_size:
-            logger.error(
-                "The number of tokens is more than the number of blocks"
+            logger.debug(
+                "Num tokens (%d) exceeds block coverage (%d blocks × %d = %d)"
                 " for request %s. "
-                "Something might be wrong in scheduling logic!",
-                tracker.req_id,
-            )
-            logger.error(
-                "Num tokens: %d, num blocks: %d, block size: %d",
+                "Expected after preemption with LMCache prefix recovery.",
                 len(token_ids),
                 num_blocks,
                 block_size,
+                num_blocks * block_size,
+                tracker.req_id,
             )
 
         block_ids = torch.tensor(tracker.allocated_block_ids, dtype=torch.long)
@@ -398,8 +396,20 @@ class ReqMeta:
             block_offsets.reshape((1, block_size))
             + block_ids.reshape((num_blocks, 1)) * block_size
         )
+        tail_slots = slot_mapping.flatten()
 
-        slot_mapping = slot_mapping.flatten()[: len(token_ids)]
+        if num_blocks * block_size < len(token_ids):
+            # This occurs after preemption with LMCache recovery: vLLM only
+            # allocates new blocks for the non-cached suffix
+            # [skip_leading_tokens:], but token_ids covers the full sequence
+            # (needed for correct chunk key computation).
+            # Prepend dummy slots for the already-saved prefix — they will be
+            # masked out by store_mask in wait_for_save() anyway.
+            tail_token_count = len(token_ids) - skip_leading_tokens
+            prefix = torch.zeros(skip_leading_tokens, dtype=torch.long)
+            slot_mapping = torch.cat([prefix, tail_slots[:tail_token_count]])
+        else:
+            slot_mapping = tail_slots[: len(token_ids)]
         assert slot_mapping.dtype == torch.long  # TODO: this could be removed
 
         # For load operation: log if the request is scheduled to load
