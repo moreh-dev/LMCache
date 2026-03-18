@@ -405,7 +405,16 @@ class ReqMeta:
             # (needed for correct chunk key computation).
             # Prepend dummy slots for the already-saved prefix — they will be
             # masked out by store_mask in wait_for_save() anyway.
+            assert skip_leading_tokens > 0, (
+                f"Fewer blocks ({num_blocks}×{block_size}="
+                f"{num_blocks * block_size}) than tokens ({len(token_ids)}) "
+                f"with no LMCache prefix cached — possible scheduling bug in vLLM."
+            )
             tail_token_count = len(token_ids) - skip_leading_tokens
+            assert tail_token_count <= len(tail_slots), (
+                f"Suffix tokens ({tail_token_count}) exceed allocated slot "
+                f"coverage ({len(tail_slots)})"
+            )
             prefix = torch.zeros(skip_leading_tokens, dtype=torch.long)
             slot_mapping = torch.cat([prefix, tail_slots[:tail_token_count]])
         else:
