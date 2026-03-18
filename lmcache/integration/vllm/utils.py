@@ -333,7 +333,11 @@ def calculate_local_rank_and_world_size(vllm_config: "VllmConfig") -> Tuple[int,
     else:
         tp_size = parallel_config.tensor_parallel_size
         pp_size = parallel_config.pipeline_parallel_size
-        local_world_size = global_world_size // pp_size
+        # Account for ring_parallel_size (sequence parallelism / USP) if present.
+        # In vLLM-PCP, world_size = TP * RP (with PP=1), so we must divide by
+        # ring_parallel_size to recover the intra-node TP group size.
+        rp_size = getattr(parallel_config, "ring_parallel_size", 1)
+        local_world_size = global_world_size // (pp_size * rp_size)
         assert local_world_size == tp_size, (
             "LMCache is operating under the assumption that the "
             "local world size is equal to the tensor parallel size "
