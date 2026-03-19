@@ -545,6 +545,29 @@ class LMCacheConnectorV1Impl:
             self.use_layerwise = config.use_layerwise
             self.enable_blending = config.enable_blending
 
+            # Ring attention (RP) KV store awareness.
+            # In disaggregated prefill with ring_parallel_size > 1 each RP rank
+            # holds KV only for its own zigzag token slice.  Without this guard
+            # every RP rank would attempt to write *all* blocks to Mooncake under
+            # the same chunk keys (same token hashes) but with different physical
+            # GPU data, causing the last writer to corrupt the shared store.
+            rp_world_size = getattr(
+                vllm_config.parallel_config, "ring_parallel_size", 1
+            )
+            self._rp_world_size = rp_world_size
+            if rp_world_size > 1:
+                from vllm.distributed.parallel_state import get_rp_group
+
+                self._rp_rank = get_rp_group().rank_in_group
+                logger.info(
+                    "Ring attention detected (rp_world_size=%d, rp_rank=%d). "
+                    "KV store will be restricted to this rank's zigzag token slice.",
+                    rp_world_size,
+                    self._rp_rank,
+                )
+            else:
+                self._rp_rank = 0
+
             if self.enable_blending:
                 assert self.lmcache_engine is not None
                 assert self.lmcache_engine.gpu_connector is not None, (
@@ -631,6 +654,51 @@ class LMCacheConnectorV1Impl:
     def lookup_server(self):
         """Get the lookup server from manager."""
         return self._manager.lookup_server
+
+    def _compute_ring_store_mask(
+        self, total_tokens: int
+    ) -> Optional[torch.Tensor]:
+        """Return a boolean mask for ring-attention-aware KV storage.
+
+        With ring_parallel_size > 1 the prefill sequence is split in a zigzag
+        pattern across RP ranks.  Each RP rank physically holds valid KV data
+        only for its own slice; all other blocks contain garbage from the ring
+        communication phase.  This mask restricts LMCache to write only the
+        chunks that belong to this rank, preventing corruption of the shared
+        Mooncake store.
+
+        Zigzag assignment for RP rank r (ring_chunk_len = total_tokens // (2*RP)):
+          head: [r * ring_chunk_len, (r+1) * ring_chunk_len)
+          tail: [(2*RP-1-r) * ring_chunk_len, (2*RP-r) * ring_chunk_len)
+
+        Returns None when RP == 1 (no masking needed).
+
+        Note: For chunked prefill the total_tokens should be the FULL sequence
+        length (not the current chunk length) to preserve correct zigzag
+        boundaries.  Passing the current accumulated token count (as used by
+        SLOPE single-step prefill) is always correct.
+        """
+        if self._rp_world_size <= 1:
+            return None
+
+        ring_chunk_len = total_tokens // (2 * self._rp_world_size)
+        if ring_chunk_len == 0:
+            # Sequence too short for zigzag split; store everything.
+            return None
+
+        mask = torch.zeros(total_tokens, dtype=torch.bool)
+        r = self._rp_rank
+        rp = self._rp_world_size
+
+        head_start = r * ring_chunk_len
+        head_end = min(head_start + ring_chunk_len, total_tokens)
+        mask[head_start:head_end] = True
+
+        tail_start = (2 * rp - 1 - r) * ring_chunk_len
+        tail_end = min(tail_start + ring_chunk_len, total_tokens)
+        mask[tail_start:tail_end] = True
+
+        return mask
 
     def _setup_metrics(self):
         """Setup metrics for monitoring data structures in the connector."""
@@ -1073,12 +1141,19 @@ class LMCacheConnectorV1Impl:
                 store_mask = torch.ones(len(token_ids), dtype=torch.bool)
                 store_mask[:skip_leading_tokens] = False
 
+                # Ring attention: only store KV for tokens owned by this RP rank.
+                ring_mask = self._compute_ring_store_mask(len(token_ids))
+                if ring_mask is not None:
+                    store_mask = store_mask & ring_mask.to(store_mask.device)
+
                 logger.debug(
                     "Storing KV cache for %d out of %d tokens "
-                    "(skip_leading_tokens=%d) for request %s",
-                    len(token_ids) - skip_leading_tokens,
+                    "(skip_leading_tokens=%d, rp_rank=%d/%d) for request %s",
+                    store_mask.sum().item(),
                     len(token_ids),
                     skip_leading_tokens,
+                    self._rp_rank,
+                    self._rp_world_size,
                     request.req_id,
                 )
 
@@ -1161,17 +1236,11 @@ class LMCacheConnectorV1Impl:
                 * self._lmcache_chunk_size
             )
 
-            store_mask = torch.ones(len(token_ids), dtype=torch.bool)
-            store_mask[:skip_leading_tokens] = False
+            # Capture the full sequence length before any truncation for ring mask.
+            full_token_len = len(token_ids)
 
-            logger.debug(
-                "Storing KV cache for %d out of %d tokens "
-                "(skip_leading_tokens=%d) for request %s",
-                len(token_ids) - skip_leading_tokens,
-                len(token_ids),
-                skip_leading_tokens,
-                request.req_id,
-            )
+            store_mask = torch.ones(full_token_len, dtype=torch.bool)
+            store_mask[:skip_leading_tokens] = False
 
             is_last_prefill = request.is_last_prefill
             if is_last_prefill:
@@ -1187,16 +1256,94 @@ class LMCacheConnectorV1Impl:
                     store_mask = store_mask[:aligned_token_len]
                     slot_mapping = slot_mapping[:aligned_token_len]
 
-            self.lmcache_engine.store(
-                token_ids,
-                mask=store_mask,
-                kvcaches=kvcaches,
-                slot_mapping=slot_mapping,
-                offset=skip_leading_tokens,
-                transfer_spec=request.disagg_spec,
-                request_configs=request.request_configs,
-                req_id=request.req_id,
-            )
+            if self._rp_world_size > 1:
+                # Ring attention: make separate store() calls for each owned
+                # region (head and tail). LMCache's mask API requires Falses
+                # to form a contiguous PREFIX; a single mask with interior
+                # Falses (RP0's non-contiguous head+tail pattern) would raise
+                # a ValueError or store incorrect chunks. Instead, call
+                # store() once for head [r*rcl, (r+1)*rcl) and once for tail
+                # [(2RP-1-r)*rcl, (2RP-r)*rcl), each with a proper prefix mask.
+                chunk_size = self._lmcache_chunk_size
+                rcl_raw = full_token_len // (2 * self._rp_world_size)
+                rcl = (rcl_raw // chunk_size) * chunk_size
+                if rcl == 0:
+                    # Sequence too short for chunk-aligned ring KV caching.
+                    logger.debug(
+                        "Ring attention: sequence too short (%d tokens) for "
+                        "chunk-aligned KV caching (chunk_size=%d, rp=%d); "
+                        "skipping store for request %s",
+                        full_token_len,
+                        chunk_size,
+                        self._rp_world_size,
+                        request.req_id,
+                    )
+                    continue
+                r = self._rp_rank
+                rp = self._rp_world_size
+                token_len = len(token_ids)
+                head_start = r * rcl
+                head_end = min((r + 1) * rcl, token_len)
+                tail_start = (2 * rp - 1 - r) * rcl
+                tail_end = min((2 * rp - r) * rcl, token_len)
+                logger.debug(
+                    "Ring attention store: rank=%d/%d head=[%d,%d) "
+                    "tail=[%d,%d) total=%d request=%s",
+                    r, rp, head_start, head_end,
+                    tail_start, tail_end, token_len, request.req_id,
+                )
+                # HEAD region: token_ids[:head_end], prefix-Falses=head_start
+                # num_falses = head_start = r * rcl (multiple of chunk_size ✓)
+                eff_head_skip = max(skip_leading_tokens, head_start)
+                eff_head_skip = (eff_head_skip // chunk_size) * chunk_size
+                if head_end > eff_head_skip:
+                    head_mask = torch.ones(head_end, dtype=torch.bool)
+                    head_mask[:eff_head_skip] = False
+                    self.lmcache_engine.store(
+                        token_ids[:head_end],
+                        mask=head_mask if eff_head_skip > 0 else None,
+                        kvcaches=kvcaches,
+                        slot_mapping=slot_mapping[:head_end],
+                        offset=eff_head_skip,
+                        request_configs=request.request_configs,
+                        req_id=request.req_id,
+                    )
+                # TAIL region: token_ids[:tail_end], prefix-Falses=tail_start
+                # num_falses = tail_start = (2RP-1-r)*rcl (multiple of chunk_size ✓)
+                eff_tail_skip = max(skip_leading_tokens, tail_start)
+                eff_tail_skip = (eff_tail_skip // chunk_size) * chunk_size
+                if tail_end > eff_tail_skip:
+                    tail_mask = torch.ones(tail_end, dtype=torch.bool)
+                    tail_mask[:eff_tail_skip] = False
+                    self.lmcache_engine.store(
+                        token_ids[:tail_end],
+                        mask=tail_mask,
+                        kvcaches=kvcaches,
+                        slot_mapping=slot_mapping[:tail_end],
+                        offset=eff_tail_skip,
+                        transfer_spec=request.disagg_spec,
+                        request_configs=request.request_configs,
+                        req_id=request.req_id,
+                    )
+            else:
+                logger.debug(
+                    "Storing KV cache for %d out of %d tokens "
+                    "(skip_leading_tokens=%d) for request %s",
+                    store_mask.sum().item(),
+                    full_token_len,
+                    skip_leading_tokens,
+                    request.req_id,
+                )
+                self.lmcache_engine.store(
+                    token_ids,
+                    mask=store_mask,
+                    kvcaches=kvcaches,
+                    slot_mapping=slot_mapping,
+                    offset=skip_leading_tokens,
+                    transfer_spec=request.disagg_spec,
+                    request_configs=request.request_configs,
+                    req_id=request.req_id,
+                )
 
             # Update skip_leading_tokens only on last rank to ensure
             # each PP stage stores its own KV cache

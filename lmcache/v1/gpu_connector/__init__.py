@@ -68,8 +68,14 @@ def CreateGPUConnector(
 
         local_worker_id = metadata.local_worker_id
         torch_dev, dev_name = get_vllm_torch_dev()
-        torch_dev.set_device(local_worker_id)
-        device = torch.device(f"{dev_name}:{local_worker_id}")
+        # Use the actual current CUDA device rather than local_worker_id.
+        # With ring_parallel_size > 1, local_worker_id is the intra-TP-group
+        # rank (0 or 1), which differs from the physical GPU index when RP > 1.
+        # For example, RP1_TP0 has local_worker_id=0 but lives on GPU 2.
+        # vLLM has already called torch.cuda.set_device() for this worker, so
+        # current_device() always returns the correct physical GPU index.
+        device_id = torch_dev.current_device()
+        device = torch.device(f"{dev_name}:{device_id}")
 
         if config.use_layerwise:
             if config.enable_blending:

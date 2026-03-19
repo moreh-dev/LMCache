@@ -65,7 +65,7 @@ class RemoteBackend(StorageBackendInterface):
             )
             and metadata.use_mla
             and metadata.world_size > 1
-            and metadata.worker_id != 0
+            and metadata.local_worker_id != 0
         )
         logger.info(f"metadata={metadata}")
         logger.info(
