@@ -1714,7 +1714,16 @@ class LMCacheEngine:
                 # Broadcast tensor data
                 raw_tensor = memory_obj.raw_tensor
                 assert raw_tensor is not None
-                tensor_to_broadcast = raw_tensor.to(f"cuda:{self.metadata.worker_id}")
+                # Use current_device() rather than worker_id: in multi-node
+                # (--nnodes N) setups each node has CUDA_VISIBLE_DEVICES scoped
+                # to its own GPUs, so global worker_id may exceed the local
+                # device count (e.g. slave node has worker_id=2 but only
+                # CUDA_VISIBLE_DEVICES=0,1, making "cuda:2" invalid).
+                # torch.cuda.current_device() always returns the correct index
+                # within the visible-device scope for the current worker.
+                tensor_to_broadcast = raw_tensor.to(
+                    f"cuda:{torch.cuda.current_device()}"
+                )
                 self.broadcast_fn(tensor_to_broadcast, self.metadata.first_rank)
         else:
             # Receive total chunk count
