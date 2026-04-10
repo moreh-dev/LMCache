@@ -1402,8 +1402,9 @@ class LMCacheConnectorV1Impl:
         #     uncached in `update_state_after_alloc` if this request can be scheduled
         # 2. cache engine will pin the KV caches for the request
         #     unpinned in `wait_for_save` if this request can be scheduled
-        if self.kv_role == "kv_producer" and not hasattr(
-            self.lookup_client, "supports_producer_reuse"
+        if self.kv_role == "kv_producer" and (
+            not hasattr(self.lookup_client, "supports_producer_reuse")
+            or not self.lookup_client.supports_producer_reuse()
         ):
             return 0
 

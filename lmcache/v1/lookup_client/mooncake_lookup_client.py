@@ -79,8 +79,10 @@ class MooncakeLookupClient(LookupClientInterface):
         return ends[-1] if ends else 0
 
     def supports_producer_reuse(self) -> bool:
-        """Return True as MooncakeLookupClient supports producer kvcache reuse"""
-        return True
+        """Mooncake RDMA does not support producer self-read (buffer
+        allocation fails when the producer tries to read back its own
+        KV via RDMA), so disable producer reuse."""
+        return False
 
     def close(self):
         # nothing here
