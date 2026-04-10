@@ -232,6 +232,16 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
             self.kv_cache_pointers = torch.empty(
                 actual_num_layers, dtype=torch.int64, device="cpu"
             )
+            # Re-create gpu_buffer to match the actual layer count;
+            # without this, from_gpu hits a shape mismatch when
+            # memory_obj (actual layers) != gpu_buffer (metadata layers).
+            if self.gpu_buffer is not None:
+                self.gpu_buffer = torch.empty(
+                    [self.gpu_buffer.shape[0], actual_num_layers,
+                     self.gpu_buffer.shape[2], self.gpu_buffer.shape[3]],
+                    dtype=self.gpu_buffer.dtype,
+                    device=self.gpu_buffer.device,
+                )
         self.kv_cache_pointers.numpy()[:] = [t.data_ptr() for t in kv_caches]
         self.kv_cache_pointers_on_gpu[idx] = torch.empty(
             self.num_layers, dtype=torch.int64, device=self.device
