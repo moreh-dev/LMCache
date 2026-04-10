@@ -224,6 +224,14 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
         idx = self.device.index
         if idx in self.kv_cache_pointers_on_gpu:
             return self.kv_cache_pointers_on_gpu[idx]
+        # Use actual kv_caches length instead of self.num_layers to handle
+        # uneven PP splits (e.g. DeepSeek-R1 61 layers / PP=2 → 31 + 30)
+        actual_num_layers = len(kv_caches)
+        if actual_num_layers != self.num_layers:
+            self.num_layers = actual_num_layers
+            self.kv_cache_pointers = torch.empty(
+                actual_num_layers, dtype=torch.int64, device="cpu"
+            )
         self.kv_cache_pointers.numpy()[:] = [t.data_ptr() for t in kv_caches]
         self.kv_cache_pointers_on_gpu[idx] = torch.empty(
             self.num_layers, dtype=torch.int64, device=self.device

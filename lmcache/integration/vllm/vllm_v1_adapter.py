@@ -1446,6 +1446,49 @@ class LMCacheConnectorV1Impl:
                 lookup_id=req_id,
                 request_configs=request_configs,
             )
+            # Retry lookup for kv_consumer until full hit or timeout.
+            # Prefill's Mooncake put may not have completed for all chunks
+            # when the decode scheduler runs its first lookup.
+            # Partial hit + partial recompute can cause GPU memory faults.
+            if (self.kv_role == "kv_consumer"
+                    and (num_external_hit_tokens is not None)
+                    and num_external_hit_tokens < len(token_ids)
+                    and len(token_ids) >= 256):
+                import time as _time
+                for _retry in range(20):
+                    _time.sleep(0.5)
+                    if hasattr(self.lookup_client, 'reqs_status'):
+                        self.lookup_client.reqs_status.pop(req_id, None)
+                    num_external_hit_tokens = self.lookup_client.lookup(
+                        token_ids,
+                        lookup_id=req_id,
+                        request_configs=request_configs,
+                    )
+                    if (num_external_hit_tokens
+                            and num_external_hit_tokens >= len(token_ids)):
+                        logger.info(
+                            "Reqid: %s, KV lookup retry %d full hit: "
+                            "%d tokens",
+                            req_id, _retry + 1,
+                            num_external_hit_tokens,
+                        )
+                        break
+                    elif (num_external_hit_tokens
+                            and num_external_hit_tokens > 0):
+                        logger.info(
+                            "Reqid: %s, KV lookup retry %d partial: "
+                            "%d/%d tokens",
+                            req_id, _retry + 1,
+                            num_external_hit_tokens, len(token_ids),
+                        )
+                else:
+                    logger.warning(
+                        "Reqid: %s, KV lookup exhausted 20 retries, "
+                        "hit %d/%d tokens",
+                        req_id,
+                        num_external_hit_tokens or 0,
+                        len(token_ids),
+                    )
 
         if num_external_hit_tokens is None:
             logger.debug(
