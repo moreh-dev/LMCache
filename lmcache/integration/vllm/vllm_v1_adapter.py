@@ -1448,15 +1448,21 @@ class LMCacheConnectorV1Impl:
                 request_configs=request_configs,
             )
             # Retry lookup for kv_consumer until full hit or timeout.
-            # Prefill's Mooncake put may not have completed for all chunks
-            # when the decode scheduler runs its first lookup.
-            # Partial hit + partial recompute can cause GPU memory faults.
+            # Only needed for Ring Parallel (RP>=2): proxy sends to prefill
+            # and decode simultaneously, so decode may look up before
+            # prefill finishes storing all chunks.  For RP=1 (1P1D) the
+            # normal PD flow ensures KV is available before decode lookup.
+            import os as _os
+            _rp_size = int(_os.environ.get("VLLM_RING_PARALLEL_SIZE", "1"))
             if (self.kv_role == "kv_consumer"
+                    and _rp_size > 1
                     and (num_external_hit_tokens is not None)
                     and num_external_hit_tokens < len(token_ids)
                     and len(token_ids) >= 256):
                 import time as _time
-                for _retry in range(20):
+                _timeout_sec = max(10, len(token_ids) / 4096)
+                _max_retries = int(_timeout_sec / 0.5)
+                for _retry in range(_max_retries):
                     _time.sleep(0.5)
                     if hasattr(self.lookup_client, 'reqs_status'):
                         self.lookup_client.reqs_status.pop(req_id, None)
@@ -1484,9 +1490,9 @@ class LMCacheConnectorV1Impl:
                         )
                 else:
                     logger.warning(
-                        "Reqid: %s, KV lookup exhausted 20 retries, "
-                        "hit %d/%d tokens",
-                        req_id,
+                        "Reqid: %s, KV lookup exhausted %d retries "
+                        "(%.1fs), hit %d/%d tokens",
+                        req_id, _max_retries, _timeout_sec,
                         num_external_hit_tokens or 0,
                         len(token_ids),
                     )
