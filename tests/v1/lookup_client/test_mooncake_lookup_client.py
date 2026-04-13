@@ -6,17 +6,12 @@ These tests guard against known bugs in the MooncakeLookupClient,
 notably the infinite-retry loop caused by inheriting the base class
 default of ``lookup_cache() -> None`` (which the scheduler interprets
 as "still ongoing").
+
+The tests do not require the ``mooncake`` package: the mooncake import
+inside ``MooncakeLookupClient`` is lazy (inside ``__init__``), and the
+tests bypass ``__init__`` via ``__new__()`` to target ``lookup_cache()``
+in isolation.
 """
-
-# Third Party
-import pytest
-
-
-# Skip the whole module if the mooncake package is not installed.
-# MooncakeLookupClient imports ``from mooncake.store import
-# MooncakeDistributedStore`` inside __init__, so the import itself does
-# not require mooncake, but instantiation does.
-mooncake = pytest.importorskip("mooncake.store")
 
 
 def test_lookup_cache_returns_minus_one_not_none():
