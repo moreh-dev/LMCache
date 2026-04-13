@@ -79,13 +79,17 @@ class MooncakeLookupClient(LookupClientInterface):
         return ends[-1] if ends else 0
 
     def lookup_cache(self, lookup_id: str) -> Optional[int]:
-        """MooncakeLookupClient is synchronous — no cached/async results.
+        """
+        Lookup the cache for the given lookup ID. MooncakeLookupClient is
+        synchronous and does not support async/cached results.
 
-        Return -1 to indicate "not found in cache", so the caller
-        falls through to the actual lookup() call.
+        Args:
+            lookup_id: The lookup ID to lookup
 
-        Without this override the base class returns None (="ongoing"),
-        which causes the scheduler to retry indefinitely.
+        Returns:
+            Always returns -1 to indicate "not found in cache". Returning None
+            (the base class default) would cause the scheduler to retry
+            indefinitely.
         """
         return -1
 
