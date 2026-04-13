@@ -78,6 +78,17 @@ class MooncakeLookupClient(LookupClientInterface):
         # All keys were found, return the last end position
         return ends[-1] if ends else 0
 
+    def lookup_cache(self, lookup_id: str) -> Optional[int]:
+        """MooncakeLookupClient is synchronous — no cached/async results.
+
+        Return -1 to indicate "not found in cache", so the caller
+        falls through to the actual lookup() call.
+
+        Without this override the base class returns None (="ongoing"),
+        which causes the scheduler to retry indefinitely.
+        """
+        return -1
+
     def supports_producer_reuse(self) -> bool:
         """Return True as MooncakeLookupClient supports producer kvcache reuse"""
         return True
