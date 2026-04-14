@@ -211,15 +211,22 @@ class TokenDatabase(metaclass=abc.ABCMeta):
         # When save_only_first_rank is enabled (for MLA), we deliberately
         # collapse the CacheEngineKey.world_size to 1 so that cache keys
         # become world-size agnostic across compatible deployments.
-        # Similarly, collapse worker_id to first_rank (0) so that all
-        # TP-group first ranks (e.g. RP0_TP0 and RP1_TP0 in ring-parallel
-        # prefill) use the same canonical worker_id in their keys, making
-        # their stored chunks findable by the decode worker (which also
-        # uses worker_id=first_rank=0 for its lookups).
+        # Similarly, collapse worker_id to the PP-stage-aware first rank so
+        # that all TP workers within the same PP stage use the same canonical
+        # worker_id. This uses (worker_id // local_world_size) * local_world_size
+        # instead of hardcoded first_rank=0, preventing key collisions between
+        # PP stages (e.g. PP0 gets worker_id=0, PP1 gets worker_id=8 for TP=8).
+        if self.save_only_first_rank:
+            pp_stage_first_rank = (
+                (self.metadata.worker_id // self.metadata.local_world_size)
+                * self.metadata.local_world_size
+            )
+        else:
+            pp_stage_first_rank = self.metadata.worker_id
         return CacheEngineKey(
             self.metadata.model_name,
             self.metadata.world_size if not self.save_only_first_rank else 1,
-            self.metadata.worker_id if not self.save_only_first_rank else self.metadata.first_rank,
+            pp_stage_first_rank,
             chunk_hash,
             self.metadata.kv_dtype,
             request_configs,
