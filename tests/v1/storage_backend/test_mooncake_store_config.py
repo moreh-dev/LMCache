@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Unit tests for MooncakeStoreConfig.enable_ssd_offload field."""
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
