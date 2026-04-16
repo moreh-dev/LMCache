@@ -34,6 +34,7 @@ class MooncakeStoreConfig:
     transfer_timeout: int
     storage_root_dir: str
     prefer_local_alloc: bool = False
+    enable_ssd_offload: bool = False
 
     @staticmethod
     def from_file(file_path: str) -> "MooncakeStoreConfig":
@@ -54,6 +55,7 @@ class MooncakeStoreConfig:
             transfer_timeout=config.get("transfer_timeout", 1),
             storage_root_dir=config.get("storage_root_dir", ""),
             prefer_local_alloc=prefer_local_alloc,
+            enable_ssd_offload=config.get("enable_ssd_offload", False),
         )
 
     @staticmethod
@@ -88,6 +90,7 @@ class MooncakeStoreConfig:
             transfer_timeout=extra_config.get("transfer_timeout", 1),
             storage_root_dir=extra_config.get("storage_root_dir", ""),
             prefer_local_alloc=prefer_local_alloc,
+            enable_ssd_offload=extra_config.get("enable_ssd_offload", False),
         )
 
 
@@ -195,6 +198,7 @@ class MooncakestoreConnector(RemoteConnector):
                 self.config.protocol,
                 self.config.device_name,
                 self.config.master_server_address,
+                enable_ssd_offload=self.config.enable_ssd_offload,
             )
             logger.info("Mooncake store setup completed successfully")
 
