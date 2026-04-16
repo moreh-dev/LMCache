@@ -190,6 +190,13 @@ class MooncakestoreConnector(RemoteConnector):
                     f"Failed to determine NUMA mapping before Mooncake setup: {e}"
                 )
 
+            # Only pass enable_ssd_offload when explicitly enabled to maintain
+            # backward compatibility with older Mooncake versions that don't
+            # support this parameter (added in kvcache-ai/Mooncake#1857).
+            optional_kwargs = {}
+            if self.config.enable_ssd_offload:
+                optional_kwargs["enable_ssd_offload"] = True
+
             self.store.setup(
                 self.config.local_hostname,
                 self.config.metadata_server,
@@ -198,7 +205,7 @@ class MooncakestoreConnector(RemoteConnector):
                 self.config.protocol,
                 self.config.device_name,
                 self.config.master_server_address,
-                enable_ssd_offload=self.config.enable_ssd_offload,
+                **optional_kwargs,
             )
             logger.info("Mooncake store setup completed successfully")
 
