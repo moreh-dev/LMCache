@@ -225,6 +225,12 @@ Configuration
    * - ``mooncake_prefer_local_alloc``
      - False
      - Prefer allocating on the local segment when possible.
+   * - ``enable_ssd_offload``
+     - False
+     - Enable LOCAL_DISK offload via Mooncake FileStorage. When true, Mooncake
+       replicates DRAM data to local SSD via a background heartbeat. Requires
+       Mooncake master config ``enable_offload: true`` and the ``MOONCAKE_OFFLOAD_FILE_STORAGE_PATH``
+       environment variable set. See `Mooncake PR #1857 <https://github.com/kvcache-ai/Mooncake/pull/1857>`_.
 
 .. important::
    **Understanding global_segment_size**: This parameter defines the amount of memory each vLLM worker contributes to the distributed memory pool. 
