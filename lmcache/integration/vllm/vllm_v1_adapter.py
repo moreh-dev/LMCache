@@ -1448,14 +1448,16 @@ class LMCacheConnectorV1Impl:
                 request_configs=request_configs,
             )
             # Retry lookup for kv_consumer until full hit or timeout.
-            # Only needed for Ring Parallel (RP>=2): proxy sends to prefill
-            # and decode simultaneously, so decode may look up before
-            # prefill finishes storing all chunks.  For RP=1 (1P1D) the
-            # normal PD flow ensures KV is available before decode lookup.
+            # Original intent was RP>=2 only, since RP=1 (1P1D) proxy flow
+            # ensures KV is stored before decode lookup.  However partial
+            # hits can still occur under RP=1 when Mooncake placement is
+            # disrupted (e.g., stale segments from orphan clients).  Keep
+            # the retry as a safety net for both RP=1 and RP>=2; it is a
+            # no-op when the first lookup returns a full hit.
             import os as _os
             _rp_size = int(_os.environ.get("VLLM_RING_PARALLEL_SIZE", "1"))
             if (self.kv_role == "kv_consumer"
-                    and _rp_size > 1
+                    and _rp_size >= 1
                     and (num_external_hit_tokens is not None)
                     and num_external_hit_tokens < len(token_ids)
                     and len(token_ids) >= 256):
