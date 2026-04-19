@@ -681,7 +681,19 @@ class LMCacheConnectorV1Impl:
         if self._rp_world_size <= 1:
             return None
 
-        ring_chunk_len = total_tokens // (2 * self._rp_world_size)
+        # VLLM_RING_FIXED_CHUNK (set by vllm_moreh ring patch) pins
+        # ring_chunk_len across requests so the zigzag block→rank mapping
+        # stays stable as total_tokens varies. Must be the SAME env value
+        # set on prefill (model_runner_patch) and NIXL
+        # (compute_rp_block_mapping); otherwise the store mask on LMCache
+        # will disagree with the prefill KV layout and APC will corrupt
+        # or aperture-fault on RP > 1. Fallback (env unset / 0) keeps
+        # the original L-dependent formula for non-APC callers.
+        _fixed_chunk = int(os.environ.get("VLLM_RING_FIXED_CHUNK", "0"))
+        if _fixed_chunk > 0:
+            ring_chunk_len = _fixed_chunk
+        else:
+            ring_chunk_len = total_tokens // (2 * self._rp_world_size)
         if ring_chunk_len == 0:
             # Sequence too short for zigzag split; store everything.
             return None
@@ -1265,7 +1277,17 @@ class LMCacheConnectorV1Impl:
                 # store() once for head [r*rcl, (r+1)*rcl) and once for tail
                 # [(2RP-1-r)*rcl, (2RP-r)*rcl), each with a proper prefix mask.
                 chunk_size = self._lmcache_chunk_size
-                rcl_raw = full_token_len // (2 * self._rp_world_size)
+                # VLLM_RING_FIXED_CHUNK pins rcl to keep block→rank L-invariant
+                # (matches vllm_moreh model_runner_patch Step 1 and NIXL
+                # compute_rp_block_mapping). Must resolve to the SAME value all
+                # three paths use, else R2+ store / R1 retrieve disagree and
+                # APC serves wrong-position KV. Fallback (env=0) keeps original
+                # L-dependent formula.
+                _fixed_chunk = int(os.environ.get("VLLM_RING_FIXED_CHUNK", "0"))
+                if _fixed_chunk > 0:
+                    rcl_raw = _fixed_chunk
+                else:
+                    rcl_raw = full_token_len // (2 * self._rp_world_size)
                 rcl = (rcl_raw // chunk_size) * chunk_size
                 if rcl == 0:
                     # Sequence too short for chunk-aligned ring KV caching.
