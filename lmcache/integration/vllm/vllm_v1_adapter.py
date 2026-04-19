@@ -690,7 +690,11 @@ class LMCacheConnectorV1Impl:
         # or aperture-fault on RP > 1. Fallback (env unset / 0) keeps
         # the original L-dependent formula for non-APC callers.
         _fixed_chunk = int(os.environ.get("VLLM_RING_FIXED_CHUNK", "0"))
-        if _fixed_chunk > 0:
+        rp_align = 2 * self._rp_world_size
+        if _fixed_chunk > 0 and total_tokens >= rp_align * _fixed_chunk:
+            # Small-L fallback (matches model_runner_patch Step 1): below
+            # the full cap, each rank's zigzag slice is derived from L so
+            # store/retrieve boundaries align with prefill KV layout.
             ring_chunk_len = _fixed_chunk
         else:
             ring_chunk_len = total_tokens // (2 * self._rp_world_size)
@@ -1284,7 +1288,12 @@ class LMCacheConnectorV1Impl:
                 # APC serves wrong-position KV. Fallback (env=0) keeps original
                 # L-dependent formula.
                 _fixed_chunk = int(os.environ.get("VLLM_RING_FIXED_CHUNK", "0"))
-                if _fixed_chunk > 0:
+                rp_align = 2 * self._rp_world_size
+                if _fixed_chunk > 0 and full_token_len >= rp_align * _fixed_chunk:
+                    # Small-L fallback (matches model_runner_patch): only
+                    # full-size requests pin to FIXED_CHUNK; smaller L uses
+                    # the per-request formula so store offsets agree with
+                    # the prefill zigzag layout.
                     rcl_raw = _fixed_chunk
                 else:
                     rcl_raw = full_token_len // (2 * self._rp_world_size)
