@@ -1487,24 +1487,31 @@ class LMCacheConnectorV1Impl:
             # no-op when the first lookup returns a full hit.
             import os as _os
             _rp_size = int(_os.environ.get("VLLM_RING_PARALLEL_SIZE", "1"))
+            # Only enter retry loop if first lookup returned 0 — the real
+            # "store not started yet" cold-path signal. Once any partial hit
+            # is observed (>0), subsequent lookups won't gain more than the
+            # store-saturation value (aligned_L minus 1-2 chunks, due to
+            # vLLM block_size vs LMCache chunk_size alignment), so warm
+            # partial hits are accepted immediately with zero retry overhead.
+            #
+            # Inside the loop (cold path), retry until the hit count
+            # plateaus: if consecutive lookups return the same value, the
+            # store has reached its saturation point; break. This avoids
+            # accepting a small in-progress partial that would force vLLM
+            # to recompute more tokens than necessary.
             if (self.kv_role == "kv_consumer"
                     and _rp_size >= 1
-                    and (num_external_hit_tokens is not None)
-                    and num_external_hit_tokens < len(token_ids)
+                    and num_external_hit_tokens == 0
                     and len(token_ids) >= 256):
                 import time as _time
                 _timeout_sec = max(10, len(token_ids) / 4096)
                 _max_retries = int(_timeout_sec / 0.5)
-                # Early-return when hit count stalls: retry is only useful
-                # while async store is making progress. For unaligned L
-                # (L % lmcache_chunk_size != 0) the store caps at aligned_L
-                # and never reaches len(token_ids), so without this we burn
-                # the full _timeout_sec waiting for something that cannot
-                # happen. Set LMCACHE_RETRY_STALE_LIMIT=999 to restore the
-                # old behavior.
+                # Plateau detection: break when hit stops increasing for
+                # LMCACHE_RETRY_STALE_LIMIT consecutive iterations (default 2).
+                # =999 restores the old behavior (retry until timeout).
                 _stale_limit = int(
                     _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "2"))
-                _prev_hit = num_external_hit_tokens
+                _prev_hit = 0
                 _stale = 0
                 for _retry in range(_max_retries):
                     _time.sleep(0.5)
@@ -1515,37 +1522,32 @@ class LMCacheConnectorV1Impl:
                         lookup_id=req_id,
                         request_configs=request_configs,
                     )
-                    if (num_external_hit_tokens
-                            and num_external_hit_tokens >= len(token_ids)):
-                        logger.info(
-                            "Reqid: %s, KV lookup retry %d full hit: "
-                            "%d tokens",
-                            req_id, _retry + 1,
-                            num_external_hit_tokens,
-                        )
-                        break
-                    elif (num_external_hit_tokens
-                            and num_external_hit_tokens > 0):
-                        logger.info(
-                            "Reqid: %s, KV lookup retry %d partial: "
-                            "%d/%d tokens",
-                            req_id, _retry + 1,
-                            num_external_hit_tokens, len(token_ids),
-                        )
                     _curr_hit = num_external_hit_tokens or 0
-                    if _curr_hit <= _prev_hit:
+                    if _curr_hit > _prev_hit:
+                        _stale = 0
+                        logger.info(
+                            "Reqid: %s, KV lookup retry %d progressing: "
+                            "%d/%d tokens (prev=%d)",
+                            req_id, _retry + 1,
+                            _curr_hit, len(token_ids), _prev_hit,
+                        )
+                    else:
                         _stale += 1
-                        if _stale >= _stale_limit:
+                        if _curr_hit > 0 and _stale >= _stale_limit:
                             logger.info(
-                                "Reqid: %s, KV lookup retry %d stalled at "
-                                "%d/%d tokens (no progress for %d iters) "
-                                "-> early return",
+                                "Reqid: %s, KV lookup retry %d plateau at "
+                                "%d/%d tokens (stable for %d iters) -> break",
                                 req_id, _retry + 1, _curr_hit,
                                 len(token_ids), _stale_limit,
                             )
                             break
-                    else:
-                        _stale = 0
+                        if _curr_hit == 0 and _stale >= _stale_limit:
+                            logger.info(
+                                "Reqid: %s, KV lookup retry %d still zero "
+                                "for %d iters -> early return",
+                                req_id, _retry + 1, _stale_limit,
+                            )
+                            break
                     _prev_hit = _curr_hit
                 else:
                     logger.warning(
