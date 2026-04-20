@@ -1495,6 +1495,17 @@ class LMCacheConnectorV1Impl:
                 import time as _time
                 _timeout_sec = max(10, len(token_ids) / 4096)
                 _max_retries = int(_timeout_sec / 0.5)
+                # Early-return when hit count stalls: retry is only useful
+                # while async store is making progress. For unaligned L
+                # (L % lmcache_chunk_size != 0) the store caps at aligned_L
+                # and never reaches len(token_ids), so without this we burn
+                # the full _timeout_sec waiting for something that cannot
+                # happen. Set LMCACHE_RETRY_STALE_LIMIT=999 to restore the
+                # old behavior.
+                _stale_limit = int(
+                    _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "2"))
+                _prev_hit = num_external_hit_tokens
+                _stale = 0
                 for _retry in range(_max_retries):
                     _time.sleep(0.5)
                     if hasattr(self.lookup_client, 'reqs_status'):
@@ -1521,6 +1532,21 @@ class LMCacheConnectorV1Impl:
                             req_id, _retry + 1,
                             num_external_hit_tokens, len(token_ids),
                         )
+                    _curr_hit = num_external_hit_tokens or 0
+                    if _curr_hit <= _prev_hit:
+                        _stale += 1
+                        if _stale >= _stale_limit:
+                            logger.info(
+                                "Reqid: %s, KV lookup retry %d stalled at "
+                                "%d/%d tokens (no progress for %d iters) "
+                                "-> early return",
+                                req_id, _retry + 1, _curr_hit,
+                                len(token_ids), _stale_limit,
+                            )
+                            break
+                    else:
+                        _stale = 0
+                    _prev_hit = _curr_hit
                 else:
                     logger.warning(
                         "Reqid: %s, KV lookup exhausted %d retries "
