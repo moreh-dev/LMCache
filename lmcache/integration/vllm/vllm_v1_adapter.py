@@ -655,6 +655,117 @@ class LMCacheConnectorV1Impl:
         """Get the lookup server from manager."""
         return self._manager.lookup_server
 
+    def _allgather_rp_boundary_kv(
+        self,
+        slot_mapping: torch.Tensor,
+        full_token_len: int,
+    ) -> None:
+        """All-reduce KV boundary blocks so every RP rank has correct data.
+
+        Called in wait_for_save BEFORE LMCache reads GPU KV blocks.  Both RP
+        ranks must call this for the same request simultaneously (they are
+        always in the same batch for ring attention, so this is guaranteed).
+
+        VLLM_RING_ALLREDUCE_LMCACHE=1 enables this path.  Unlike the
+        NIXL P2P path (_allgather_rp_kv), this operates directly on
+        self.kv_caches (the GPU KV tensors shared with LMCache) using
+        slot_mapping to identify which physical blocks are boundary blocks.
+        """
+        rp = self._rp_world_size
+        r = self._rp_rank
+        if rp <= 1 or full_token_len == 0 or len(slot_mapping) == 0:
+            return
+
+        try:
+            from vllm.distributed.parallel_state import get_rp_group
+            rp_group = get_rp_group()
+        except Exception:
+            return
+
+        block_size = self._parent.vllm_config.cache_config.block_size
+
+        rp_align = 2 * rp
+        _fixed_chunk = int(os.environ.get("VLLM_RING_FIXED_CHUNK", "0"))
+        if _fixed_chunk > 0 and full_token_len >= rp_align * _fixed_chunk:
+            ring_chunk_len = _fixed_chunk
+        else:
+            ring_chunk_len = (full_token_len + rp_align - 1) // rp_align
+
+        head_start = ring_chunk_len * r
+        head_end   = min(head_start + ring_chunk_len, full_token_len)
+        tail_start = ring_chunk_len * (2 * rp - 1 - r)
+        tail_end   = min(tail_start + ring_chunk_len, full_token_len)
+
+        dev = slot_mapping.device
+        # Filter out invalid slots (-1 from padding)
+        valid = slot_mapping >= 0
+        if not valid.all():
+            slot_mapping = slot_mapping.clone()
+            slot_mapping[~valid] = 0  # temporary; filtered out below
+
+        P = torch.arange(full_token_len, device=dev, dtype=torch.long)
+        owned = (
+            ((P >= head_start) & (P < head_end))
+            | ((P >= tail_start) & (P < tail_end))
+        )
+        if not valid.all():
+            owned = owned & valid  # pad positions are not owned
+
+        phys_bid = slot_mapping // block_size   # [full_token_len]
+        phys_off = slot_mapping % block_size    # [full_token_len]
+
+        unique_bids, inv = torch.unique(phys_bid, return_inverse=True)
+        n_unique = len(unique_bids)
+        owned_cnt   = torch.zeros(n_unique, dtype=torch.long, device=dev)
+        unowned_cnt = torch.zeros(n_unique, dtype=torch.long, device=dev)
+        owned_cnt.scatter_add_(0, inv, owned.long())
+        unowned_cnt.scatter_add_(0, inv, (~owned & valid).long())
+
+        is_boundary = (owned_cnt > 0) & (unowned_cnt > 0)
+        if not is_boundary.any():
+            return
+
+        boundary_idxs = is_boundary.nonzero(as_tuple=True)[0]
+        boundary_bids = unique_bids[boundary_idxs].tolist()
+        n_boundary = len(boundary_bids)
+
+        # Build [n_boundary, block_size] ownership mask
+        boundary_mask = torch.zeros(n_boundary, block_size, dtype=torch.bool, device=dev)
+        for local_i, uid_idx in enumerate(boundary_idxs.tolist()):
+            pos_in_blk = (inv == uid_idx).nonzero(as_tuple=True)[0]
+            offs = phys_off[pos_in_blk]
+            own  = owned[pos_in_blk]
+            boundary_mask[local_i].scatter_(0, offs[own].long(), True)
+
+        for cache in self.kv_caches.values():
+            selected = cache[boundary_bids]   # copy [n_boundary, ...]
+            dims = selected.shape
+            block_dim_idx = -1
+            for idx, dim in enumerate(dims):
+                if idx > 0 and dim == block_size:
+                    block_dim_idx = idx
+                    break
+            if block_dim_idx == -1:
+                continue
+
+            view_shape = [1] * len(dims)
+            view_shape[0] = n_boundary
+            view_shape[block_dim_idx] = block_size
+            dev_mask = boundary_mask.to(selected.device).view(view_shape)
+
+            selected.masked_fill_(~dev_mask, 0)
+            torch.distributed.all_reduce(
+                selected,
+                op=torch.distributed.ReduceOp.SUM,
+                group=rp_group.device_group,
+            )
+            cache[boundary_bids] = selected
+
+        logger.debug(
+            "allgather_rp_boundary_kv: rank=%d/%d fixed=%d boundary_blocks=%d",
+            r, rp, _fixed_chunk, n_boundary,
+        )
+
     def _compute_ring_store_mask(
         self, total_tokens: int
     ) -> Optional[torch.Tensor]:
@@ -1257,6 +1368,14 @@ class LMCacheConnectorV1Impl:
 
             store_mask = torch.ones(full_token_len, dtype=torch.bool)
             store_mask[:skip_leading_tokens] = False
+
+            # Ring boundary all-reduce: fill zeros at boundary blocks so
+            # LMCache stores correct KV for all positions.
+            # VLLM_RING_ALLREDUCE_LMCACHE=1 enables; both RP ranks must be
+            # processing the same request batch simultaneously.
+            if (self._rp_world_size > 1
+                    and int(os.environ.get("VLLM_RING_ALLREDUCE_LMCACHE", "0"))):
+                self._allgather_rp_boundary_kv(slot_mapping, full_token_len)
 
             is_last_prefill = request.is_last_prefill
             if is_last_prefill:
