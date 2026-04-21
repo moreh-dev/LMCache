@@ -1553,7 +1553,8 @@ class LMCacheConnectorV1Impl:
         # 2. cache engine will pin the KV caches for the request
         #     unpinned in `wait_for_save` if this request can be scheduled
         if self.kv_role == "kv_producer" and (
-            not hasattr(self.lookup_client, "supports_producer_reuse")
+            int(os.environ.get("VLLM_DISABLE_PRODUCER_REUSE", "0"))
+            or not hasattr(self.lookup_client, "supports_producer_reuse")
             or not self.lookup_client.supports_producer_reuse()
         ):
             return 0
