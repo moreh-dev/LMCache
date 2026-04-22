@@ -1630,7 +1630,7 @@ class LMCacheConnectorV1Impl:
                 # LMCACHE_RETRY_STALE_LIMIT consecutive iterations (default 2).
                 # =999 restores the old behavior (retry until timeout).
                 _stale_limit = int(
-                    _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "2"))
+                    _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "") or "2")
                 _prev_hit = 0
                 _stale = 0
                 for _retry in range(_max_retries):
