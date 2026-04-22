@@ -1681,6 +1681,31 @@ class LMCacheConnectorV1Impl:
                         len(token_ids),
                     )
 
+        # Ring attention safety: genuine partial prefix reuse breaks ring
+        # communication — the scheduler skips ring computation for matched
+        # tokens, but P-slave may not agree on the boundary, causing mismatch.
+        # "Chunk-aligned full match" (hit == all_complete_chunks) is safe because
+        # LMCache never stores the trailing partial chunk anyway, so both
+        # P-master and P-slave will see the same hit count and skip the same
+        # prefix uniformly.  Only reject hits that are shorter than all
+        # complete chunks (genuine partial prefix from a different request).
+        # Note: _rp_world_size is set only on WORKER role; fall back to env var.
+        _ring_size = getattr(self, "_rp_world_size",
+                             int(os.environ.get("VLLM_RING_PARALLEL_SIZE", "1")))
+        if _ring_size > 1 and self.kv_role == "kv_producer":
+            _chunk_size = getattr(self.config, "chunk_size", 256)
+            _max_full_hit = (request.num_tokens // _chunk_size) * _chunk_size
+            if (num_external_hit_tokens is not None
+                    and isinstance(num_external_hit_tokens, int)
+                    and 0 < num_external_hit_tokens < _max_full_hit):
+                logger.info(
+                    "Reqid: %s, ring attention partial match %d/%d "
+                    "(max_full=%d, rp_size=%d) — forcing recompute",
+                    req_id, num_external_hit_tokens, request.num_tokens,
+                    _max_full_hit, _ring_size,
+                )
+                return 0
+
         if num_external_hit_tokens is None:
             logger.debug(
                 "Reqid: %s, Total tokens %d, Inference Engine computed tokens: %d, "
