@@ -1622,9 +1622,17 @@ class LMCacheConnectorV1Impl:
             # store has reached its saturation point; break. This avoids
             # accepting a small in-progress partial that would force vLLM
             # to recompute more tokens than necessary.
+            # Compute max storable tokens (LMCache only stores complete chunks).
+            # Retry whenever hit < max_full_hit — covers both cold (hit==0) and
+            # partial-prefix cases (0 < hit < max_full_hit) where P-node may still
+            # be in the middle of ring prefill + store for the remaining tokens.
+            _consumer_chunk_size = getattr(self.config, "chunk_size", 256)
+            _consumer_max_full_hit = (
+                (len(token_ids) // _consumer_chunk_size) * _consumer_chunk_size
+            )
             if (self.kv_role == "kv_consumer"
                     and _rp_size >= 1
-                    and num_external_hit_tokens == 0
+                    and (num_external_hit_tokens or 0) < _consumer_max_full_hit
                     and len(token_ids) >= 256):
                 import time as _time
                 _timeout_sec = max(10, len(token_ids) / 4096)
@@ -1634,7 +1642,9 @@ class LMCacheConnectorV1Impl:
                 # =999 restores the old behavior (retry until timeout).
                 _stale_limit = int(
                     _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "2"))
-                _prev_hit = 0
+                # Start from the initial hit so plateau detection tracks progress
+                # above whatever was already in LMCache (e.g. shared prefix).
+                _prev_hit = num_external_hit_tokens or 0
                 _stale = 0
                 for _retry in range(_max_retries):
                     _time.sleep(0.5)
@@ -1681,30 +1691,6 @@ class LMCacheConnectorV1Impl:
                         len(token_ids),
                     )
 
-        # Ring attention safety: genuine partial prefix reuse breaks ring
-        # communication — the scheduler skips ring computation for matched
-        # tokens, but P-slave may not agree on the boundary, causing mismatch.
-        # "Chunk-aligned full match" (hit == all_complete_chunks) is safe because
-        # LMCache never stores the trailing partial chunk anyway, so both
-        # P-master and P-slave will see the same hit count and skip the same
-        # prefix uniformly.  Only reject hits that are shorter than all
-        # complete chunks (genuine partial prefix from a different request).
-        # Note: _rp_world_size is set only on WORKER role; fall back to env var.
-        _ring_size = getattr(self, "_rp_world_size",
-                             int(os.environ.get("VLLM_RING_PARALLEL_SIZE", "1")))
-        if _ring_size > 1 and self.kv_role == "kv_producer":
-            _chunk_size = getattr(self.config, "chunk_size", 256)
-            _max_full_hit = (request.num_tokens // _chunk_size) * _chunk_size
-            if (num_external_hit_tokens is not None
-                    and isinstance(num_external_hit_tokens, int)
-                    and 0 < num_external_hit_tokens < _max_full_hit):
-                logger.info(
-                    "Reqid: %s, ring attention partial match %d/%d "
-                    "(max_full=%d, rp_size=%d) — forcing recompute",
-                    req_id, num_external_hit_tokens, request.num_tokens,
-                    _max_full_hit, _ring_size,
-                )
-                return 0
 
         if num_external_hit_tokens is None:
             logger.debug(
