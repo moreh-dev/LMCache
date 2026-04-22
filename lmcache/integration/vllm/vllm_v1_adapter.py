@@ -682,7 +682,7 @@ class LMCacheConnectorV1Impl:
         except Exception:
             return
 
-        block_size = self._parent.vllm_config.cache_config.block_size
+        block_size = self._parent._vllm_config.cache_config.block_size
 
         rp_align = 2 * rp
         _fixed_chunk = int(os.environ.get("VLLM_RING_FIXED_CHUNK", "0"))
@@ -1309,7 +1309,10 @@ class LMCacheConnectorV1Impl:
         assert isinstance(connector_metadata, LMCacheConnectorMetadata)
 
         if self.kv_role == "kv_consumer":
-            # Don't do save if the role is kv_consumer
+            # Release lookup pins before returning — pin leak if skipped
+            if self.lmcache_engine is not None:
+                for request in connector_metadata.requests:
+                    self.lmcache_engine.lookup_unpin(request.req_id)
             return
 
         if self.use_layerwise:
@@ -1416,7 +1419,7 @@ class LMCacheConnectorV1Impl:
                     rcl_raw = _fixed_chunk
                 else:
                     rcl_raw = full_token_len // (2 * self._rp_world_size)
-                rcl = (rcl_raw // chunk_size) * chunk_size
+                rcl = ((rcl_raw + chunk_size - 1) // chunk_size) * chunk_size
                 if rcl == 0:
                     # Sequence too short for chunk-aligned ring KV caching.
                     logger.debug(
