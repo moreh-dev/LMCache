@@ -1740,7 +1740,7 @@ class LMCacheConnectorV1Impl:
                 # LMCACHE_RETRY_STALE_LIMIT consecutive iterations (default 2).
                 # =999 restores the old behavior (retry until timeout).
                 _stale_limit = int(
-                    _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "2"))
+                    _os.environ.get("LMCACHE_RETRY_STALE_LIMIT", "") or "2")
                 # Start from the initial hit so plateau detection tracks progress
                 # above whatever was already in LMCache (e.g. shared prefix).
                 _prev_hit = num_external_hit_tokens or 0
