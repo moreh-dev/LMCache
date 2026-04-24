@@ -1478,12 +1478,6 @@ class LMCacheConnectorV1Impl:
                     slot_mapping, full_token_len,
                     actual_isl=request.prompt_len,
                 )
-                # Ensure NCCL all_reduce and boundary write-back (on NCCL
-                # stream) are fully visible before lmcache_engine.store()
-                # triggers D2H copy. wait_stream(current_stream) alone is
-                # not sufficient if the NCCL write-back races the default
-                # stream. Brute-force sync to diagnose ISL~4k failures.
-                torch.cuda.synchronize()
 
             is_last_prefill = request.is_last_prefill
             if is_last_prefill:
