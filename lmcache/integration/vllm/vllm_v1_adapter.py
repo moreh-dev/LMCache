@@ -881,6 +881,50 @@ class LMCacheConnectorV1Impl:
             flush=True,
         )
 
+        # Per-token cache layout (e.g., MLA on DeepSeek-R1: cache.shape =
+        # [num_total_slots, 1, hidden_per_slot] — no explicit block_size dim).
+        # The cache is indexed per slot, not per block, so boundary-block tokens
+        # must be addressed by slot_mapping directly. Detect by: no dim equals
+        # block_size AND shape[0] is much larger than the implied num_blocks
+        # (slot_max // block_size + 1). Existing per-block paths skip such caches
+        # (block_dim_idx == -1 → skip-with-warning), which leaves stale KV.
+        first_cache_obj = next(iter(self.kv_caches.values()))
+        first_dims = first_cache_obj.shape
+        block_dim_in_cache = -1
+        for idx, dim in enumerate(first_dims):
+            if idx > 0 and dim == block_size:
+                block_dim_in_cache = idx
+                break
+        try:
+            slot_max_int = int(slot_mapping.max().item())
+        except Exception:
+            slot_max_int = 0
+        implied_num_blocks = slot_max_int // block_size + 1
+        is_per_token_cache = (
+            block_dim_in_cache == -1
+            and first_dims[0] >= slot_max_int + 1
+            and first_dims[0] > implied_num_blocks * 2
+        )
+
+        if is_per_token_cache:
+            # Index by per-slot. Boundary tokens = tokens whose block is a
+            # boundary block, computed via is_boundary[inv].
+            in_bblk = is_boundary[inv] & valid           # [full_token_len]
+            btok_slots = slot_mapping[in_bblk]           # [n_btoks]
+            btok_owned = owned[in_bblk]                  # [n_btoks]
+            for cache in self.kv_caches.values():
+                selected = cache[btok_slots]             # [n_btoks, ...rest]
+                view_shape = [selected.shape[0]] + [1] * (selected.dim() - 1)
+                dev_mask = btok_owned.to(selected.device).view(view_shape)
+                selected.masked_fill_(~dev_mask, 0)
+                torch.distributed.all_reduce(
+                    selected,
+                    op=torch.distributed.ReduceOp.SUM,
+                    group=rp_group.device_group,
+                )
+                cache[btok_slots] = selected
+            return
+
         # Optional batched all_reduce: stack all layers' boundary KV into one
         # tensor and call all_reduce ONCE instead of per-layer.  Eliminates
         # ~26 × per-call latency overhead on the cold path.
