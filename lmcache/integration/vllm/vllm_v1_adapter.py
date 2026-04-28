@@ -666,6 +666,7 @@ class LMCacheConnectorV1Impl:
         full_token_len: int,
         actual_isl: int = 0,
         skip_leading_tokens: int = 0,
+        full_replicate: bool = False,
     ) -> None:
         """All-reduce KV boundary blocks so every RP rank has correct data.
 
@@ -848,6 +849,14 @@ class LMCacheConnectorV1Impl:
                     flush=True,
                 )
             is_boundary = is_boundary | (stale_cnt > 0)
+
+        # full_replicate=True: REPL=1 mode — treat ALL blocks as needing the
+        # cross-rank merge so every rank ends up with full KV in HBM.  This
+        # turns the boundary-only AR into a Phase 1 (NIXL-equivalent) full
+        # replicate, eliminating the need for zigzag-aware store logic in
+        # wait_for_save.
+        if full_replicate:
+            is_boundary = torch.ones_like(is_boundary, dtype=torch.bool)
 
         if not is_boundary.any():
             return
@@ -1602,16 +1611,27 @@ class LMCacheConnectorV1Impl:
             store_mask = torch.ones(full_token_len, dtype=torch.bool)
             store_mask[:skip_leading_tokens] = False
 
-            # Ring boundary all-reduce: fill zeros at boundary blocks so
-            # LMCache stores correct KV for all positions.
-            # VLLM_RING_ALLREDUCE_LMCACHE=1 enables; both RP ranks must be
-            # processing the same request batch simultaneously.
+            # Ring all-reduce: replicate KV across RP ranks so LMCache stores
+            # correct KV.  Two modes:
+            #   1. REPL=1 (preferred, NIXL-equivalent): full replicate ALL
+            #      blocks → every rank's HBM has full KV → store is trivial
+            #      from a single rank with no zigzag dance.
+            #   2. REPL=0 (legacy): boundary-only AR + zigzag-aware
+            #      head/tail split store.  Kept for memory-constrained
+            #      deployments that opt out of replication.
+            #
+            # Both modes require both RP ranks to call this simultaneously
+            # (they are always in the same batch for ring attention).
+            _lmcache_repl = (
+                int(os.environ.get("VLLM_RING_REPLICATED_CACHE", "0")) == 1
+            )
             if (self._rp_world_size > 1
                     and int(os.environ.get("VLLM_RING_ALLREDUCE_LMCACHE", "1"))):
                 self._allgather_rp_boundary_kv(
                     slot_mapping, full_token_len,
                     actual_isl=request.prompt_len,
                     skip_leading_tokens=skip_leading_tokens,
+                    full_replicate=_lmcache_repl,
                 )
 
             is_last_prefill = request.is_last_prefill
@@ -1627,6 +1647,54 @@ class LMCacheConnectorV1Impl:
                     token_ids = token_ids[:aligned_token_len]
                     store_mask = store_mask[:aligned_token_len]
                     slot_mapping = slot_mapping[:aligned_token_len]
+
+            if self._rp_world_size > 1 and _lmcache_repl:
+                # REPL=1 mode: HBM is fully replicated across ranks via the
+                # full_replicate AR above, so we can store from a single rank
+                # with no zigzag awareness.  Other ranks skip storing entirely
+                # (LMCache CPU storage is content-keyed; one rank's store
+                # makes the chunks visible to all readers).
+                if self._rp_rank != 0:
+                    print(
+                        f"[DBG store] rank={self._rp_rank}/{self._rp_world_size} "
+                        f"REPL=1 — skip (rank 0 stores full)",
+                        flush=True,
+                    )
+                    continue
+
+                token_len = len(token_ids)
+                chunk_size = self._lmcache_chunk_size
+                if not request.is_last_prefill and not self.enable_blending:
+                    aligned_token_len = (
+                        token_len // chunk_size * chunk_size
+                    )
+                    token_ids_to_store = token_ids[:aligned_token_len]
+                    slot_mapping_to_store = slot_mapping[:aligned_token_len]
+                else:
+                    token_ids_to_store = token_ids
+                    slot_mapping_to_store = slot_mapping
+
+                store_mask = torch.ones(
+                    len(token_ids_to_store), dtype=torch.bool
+                )
+                store_mask[:skip_leading_tokens] = False
+
+                print(
+                    f"[DBG store] rank=0/{self._rp_world_size} REPL=1 "
+                    f"token_len={len(token_ids_to_store)} "
+                    f"skip={skip_leading_tokens} (single full store)",
+                    flush=True,
+                )
+                self.lmcache_engine.store(
+                    token_ids_to_store,
+                    mask=store_mask if skip_leading_tokens > 0 else None,
+                    kvcaches=kvcaches,
+                    slot_mapping=slot_mapping_to_store,
+                    offset=skip_leading_tokens,
+                    request_configs=request.request_configs,
+                    req_id=request.req_id,
+                )
+                continue
 
             if self._rp_world_size > 1:
                 # Ring attention: make separate store() calls for each owned
