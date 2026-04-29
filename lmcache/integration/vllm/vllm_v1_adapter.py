@@ -710,12 +710,6 @@ class LMCacheConnectorV1Impl:
             ring_chunk_len = _fixed_chunk
         else:
             ring_chunk_len = (isl_for_rcl + rp_align - 1) // rp_align
-        if int(os.environ.get("VLLM_RING_RCL_CHUNK_ALIGN", "0")) == 1:
-            _align = int(os.environ.get("VLLM_RING_RCL_ALIGNMENT", "0"))
-            if _align == 0:
-                _align = int(os.environ.get("LMCACHE_CHUNK_SIZE", "0")) or 16
-            if _align > 1 and isl_for_rcl >= rp_align * _align:
-                ring_chunk_len = ((ring_chunk_len + _align - 1) // _align) * _align
 
         head_start = ring_chunk_len * r
         head_end   = min(head_start + ring_chunk_len, full_token_len)
@@ -925,116 +919,49 @@ class LMCacheConnectorV1Impl:
                 cache[btok_slots] = selected
             return
 
-        # Optional batched all_reduce: stack all layers' boundary KV into one
-        # tensor and call all_reduce ONCE instead of per-layer.  Eliminates
-        # ~26 × per-call latency overhead on the cold path.
-        # Gated by VLLM_RING_BATCHED_BOUNDARY_AR=1 (default OFF for safety).
-        _use_batched = os.environ.get(
-            "VLLM_RING_BATCHED_BOUNDARY_AR", "0"
-        ) == "1"
-
-        if _use_batched:
-            cache_list = list(self.kv_caches.values())
-            assert len(cache_list) > 0
-            first_cache = cache_list[0]
-            cache_shape_full = first_cache.shape
-            selected_dims = (n_boundary,) + tuple(cache_shape_full[1:])
+        # Per-layer all_reduce(SUM) over boundary block KV.  Standard path.
+        first_cache = True
+        for cache in self.kv_caches.values():
+            selected = cache[boundary_bids]   # copy [n_boundary, ...]
+            dims = selected.shape
             block_dim_idx = -1
-            for idx in range(1, len(selected_dims)):
-                if selected_dims[idx] == block_size:
+            for idx, dim in enumerate(dims):
+                if idx > 0 and dim == block_size:
                     block_dim_idx = idx
                     break
-            assert block_dim_idx != -1
-            view_shape = [1] * len(selected_dims)
-            view_shape[0] = n_boundary
-            view_shape[block_dim_idx] = block_size
-            dev_mask = boundary_mask.to(first_cache.device).view(view_shape)
-            stacked = torch.stack(
-                [c[boundary_bids] for c in cache_list], dim=0
-            )
-            norm_before = stacked.float().norm().item()
-            stacked.masked_fill_(~dev_mask.unsqueeze(0), 0)
-            torch.distributed.all_reduce(
-                stacked,
-                op=torch.distributed.ReduceOp.SUM,
-                group=rp_group.device_group,
-            )
-            norm_after = stacked.float().norm().item()
-            print(
-                f"[DBG allgather] rank={r}/{rp} BATCHED v2 n_layers={len(cache_list)} "
-                f"isl={full_token_len} fixed={_fixed_chunk} "
-                f"n_boundary={n_boundary} selected_dims={selected_dims} "
-                f"block_dim={block_dim_idx} "
-                f"norm_before={norm_before:.3f} norm_after={norm_after:.3f}",
-                flush=True,
-            )
-            for i, cache in enumerate(cache_list):
-                cache[boundary_bids] = stacked[i]
-        else:
-            # Optional FP8 boundary all-gather: replace per-layer all_reduce(SUM)
-            # with all_gather of fp8-compressed tensors followed by manual sum.
-            # Halves bandwidth per call.  Same fp8 dtype as warm path & ring P2P.
-            # Gated by VLLM_RING_FP8_BOUNDARY_AR=1 (default OFF for safety).
-            _use_fp8_boundary = os.environ.get(
-                "VLLM_RING_FP8_BOUNDARY_AR", "0"
-            ) == "1"
-            first_cache = True
-            for cache in self.kv_caches.values():
-                selected = cache[boundary_bids]   # copy [n_boundary, ...]
-                dims = selected.shape
-                block_dim_idx = -1
-                for idx, dim in enumerate(dims):
-                    if idx > 0 and dim == block_size:
-                        block_dim_idx = idx
-                        break
-                if block_dim_idx == -1:
-                    if first_cache:
-                        print(
-                            f"[DBG allgather] rank={r} block_dim_idx=-1 "
-                            f"cache.shape={dims} block_size={block_size} SKIPPING all_reduce!",
-                            flush=True,
-                        )
-                        first_cache = False
-                    continue
-
+            if block_dim_idx == -1:
                 if first_cache:
-                    norm_before = selected.float().norm().item()
-                view_shape = [1] * len(dims)
-                view_shape[0] = n_boundary
-                view_shape[block_dim_idx] = block_size
-                dev_mask = boundary_mask.to(selected.device).view(view_shape)
-
-                selected.masked_fill_(~dev_mask, 0)
-                if _use_fp8_boundary:
-                    _orig_dtype = selected.dtype
-                    sel_fp8 = selected.to(torch.float8_e4m3fnuz).contiguous()
-                    all_sel_fp8 = [
-                        torch.empty_like(sel_fp8) for _ in range(rp)
-                    ]
-                    torch.distributed.all_gather(
-                        all_sel_fp8, sel_fp8,
-                        group=rp_group.device_group,
-                    )
-                    selected = all_sel_fp8[0].to(_orig_dtype)
-                    for _i in range(1, rp):
-                        selected = selected + all_sel_fp8[_i].to(_orig_dtype)
-                else:
-                    torch.distributed.all_reduce(
-                        selected,
-                        op=torch.distributed.ReduceOp.SUM,
-                        group=rp_group.device_group,
-                    )
-                if first_cache:
-                    norm_after = selected.float().norm().item()
                     print(
-                        f"[DBG allgather] rank={r}/{rp} isl={full_token_len} fixed={_fixed_chunk} "
-                        f"n_boundary={n_boundary} cache.shape={dims} block_dim={block_dim_idx} "
-                        f"fp8_boundary={int(_use_fp8_boundary)} "
-                        f"norm_before={norm_before:.3f} norm_after={norm_after:.3f}",
+                        f"[DBG allgather] rank={r} block_dim_idx=-1 "
+                        f"cache.shape={dims} block_size={block_size} SKIPPING all_reduce!",
                         flush=True,
                     )
                     first_cache = False
-                cache[boundary_bids] = selected
+                continue
+
+            if first_cache:
+                norm_before = selected.float().norm().item()
+            view_shape = [1] * len(dims)
+            view_shape[0] = n_boundary
+            view_shape[block_dim_idx] = block_size
+            dev_mask = boundary_mask.to(selected.device).view(view_shape)
+
+            selected.masked_fill_(~dev_mask, 0)
+            torch.distributed.all_reduce(
+                selected,
+                op=torch.distributed.ReduceOp.SUM,
+                group=rp_group.device_group,
+            )
+            if first_cache:
+                norm_after = selected.float().norm().item()
+                print(
+                    f"[DBG allgather] rank={r}/{rp} isl={full_token_len} fixed={_fixed_chunk} "
+                    f"n_boundary={n_boundary} cache.shape={dims} block_dim={block_dim_idx} "
+                    f"norm_before={norm_before:.3f} norm_after={norm_after:.3f}",
+                    flush=True,
+                )
+                first_cache = False
+            cache[boundary_bids] = selected
 
     def _compute_ring_store_mask(
         self, total_tokens: int
@@ -1079,12 +1006,6 @@ class LMCacheConnectorV1Impl:
             ring_chunk_len = _fixed_chunk
         else:
             ring_chunk_len = total_tokens // (2 * self._rp_world_size)
-        if int(os.environ.get("VLLM_RING_RCL_CHUNK_ALIGN", "0")) == 1:
-            _align = int(os.environ.get("VLLM_RING_RCL_ALIGNMENT", "0"))
-            if _align == 0:
-                _align = int(os.environ.get("LMCACHE_CHUNK_SIZE", "0")) or 16
-            if _align > 1 and total_tokens >= rp_align * _align:
-                ring_chunk_len = ((ring_chunk_len + _align - 1) // _align) * _align
         if ring_chunk_len == 0:
             # Sequence too short for zigzag split; store everything.
             return None
@@ -1764,17 +1685,7 @@ class LMCacheConnectorV1Impl:
                     # the prefill zigzag layout.
                     rcl_raw = _fixed_chunk
                 else:
-                    _do_align = (
-                        int(os.environ.get("VLLM_RING_RCL_CHUNK_ALIGN", "0")) == 1
-                    )
-                    _isl_for_rcl = (
-                        request.prompt_len if request.prompt_len > 0
-                        else full_token_len
-                    )
-                    if _do_align and _isl_for_rcl >= rp_align * chunk_size:
-                        rcl_raw = (_isl_for_rcl + rp_align - 1) // rp_align
-                    else:
-                        rcl_raw = full_token_len // (2 * self._rp_world_size)
+                    rcl_raw = full_token_len // (2 * self._rp_world_size)
                 rcl = ((rcl_raw + chunk_size - 1) // chunk_size) * chunk_size
                 if rcl == 0:
                     # Sequence too short for chunk-aligned ring KV caching.
