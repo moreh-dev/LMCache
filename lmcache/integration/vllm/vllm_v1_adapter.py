@@ -1590,13 +1590,16 @@ class LMCacheConnectorV1Impl:
             _lmcache_repl = (
                 int(os.environ.get("VLLM_RING_REPLICATED_CACHE", "0")) == 1
             )
+            _rank_aware = (
+                os.environ.get("VLLM_RING_RANK_AWARE_KEYS", "0") == "1"
+            )
             if (self._rp_world_size > 1
                     and int(os.environ.get("VLLM_RING_ALLREDUCE_LMCACHE", "1"))):
                 self._allgather_rp_boundary_kv(
                     slot_mapping, full_token_len,
                     actual_isl=request.prompt_len,
                     skip_leading_tokens=skip_leading_tokens,
-                    full_replicate=_lmcache_repl,
+                    full_replicate=_lmcache_repl and not _rank_aware,
                 )
 
             is_last_prefill = request.is_last_prefill
@@ -1613,7 +1616,7 @@ class LMCacheConnectorV1Impl:
                     store_mask = store_mask[:aligned_token_len]
                     slot_mapping = slot_mapping[:aligned_token_len]
 
-            if self._rp_world_size > 1 and _lmcache_repl:
+            if self._rp_world_size > 1 and _lmcache_repl and not _rank_aware:
                 # REPL=1 mode: HBM is fully replicated across ranks via the
                 # full_replicate AR above, so we can store from a single rank
                 # with no zigzag awareness.  Other ranks skip storing entirely
@@ -1719,13 +1722,16 @@ class LMCacheConnectorV1Impl:
                 if head_end > eff_head_skip:
                     head_mask = torch.ones(head_end, dtype=torch.bool)
                     head_mask[:eff_head_skip] = False
+                    _head_configs = dict(request.request_configs or {})
+                    if _rank_aware:
+                        _head_configs["lmcache.tag.rprank"] = str(self._rp_rank)
                     self.lmcache_engine.store(
                         token_ids[:head_end],
                         mask=head_mask if eff_head_skip > 0 else None,
                         kvcaches=kvcaches,
                         slot_mapping=slot_mapping[:head_end],
                         offset=eff_head_skip,
-                        request_configs=request.request_configs,
+                        request_configs=_head_configs,
                         req_id=request.req_id,
                     )
                 # TAIL region: token_ids[:tail_end], prefix-Falses=tail_start
@@ -1735,6 +1741,9 @@ class LMCacheConnectorV1Impl:
                 if tail_end > eff_tail_skip:
                     tail_mask = torch.ones(tail_end, dtype=torch.bool)
                     tail_mask[:eff_tail_skip] = False
+                    _tail_configs = dict(request.request_configs or {})
+                    if _rank_aware:
+                        _tail_configs["lmcache.tag.rprank"] = str(self._rp_rank)
                     self.lmcache_engine.store(
                         token_ids[:tail_end],
                         mask=tail_mask,
@@ -1742,7 +1751,7 @@ class LMCacheConnectorV1Impl:
                         slot_mapping=slot_mapping[:tail_end],
                         offset=eff_tail_skip,
                         transfer_spec=request.disagg_spec,
-                        request_configs=request.request_configs,
+                        request_configs=_tail_configs,
                         req_id=request.req_id,
                     )
             else:
