@@ -1877,28 +1877,36 @@ class LMCacheConnectorV1Impl:
             # no-op when the first lookup returns a full hit.
             import os as _os
             _rp_size = int(_os.environ.get("VLLM_RING_PARALLEL_SIZE", "1"))
-            # Only enter retry loop if first lookup returned 0 — the real
-            # "store not started yet" cold-path signal. Once any partial hit
-            # is observed (>0), subsequent lookups won't gain more than the
-            # store-saturation value (aligned_L minus 1-2 chunks, due to
-            # vLLM block_size vs LMCache chunk_size alignment), so warm
-            # partial hits are accepted immediately with zero retry overhead.
+            # Retry is only meaningful for ring zigzag store mode where
+            # partial hits can occur because P-master and P-slave each
+            # store only their owned chunks (head/tail) and the lookup
+            # might race with the still-in-flight stores.
             #
-            # Inside the loop (cold path), retry until the hit count
-            # plateaus: if consecutive lookups return the same value, the
-            # store has reached its saturation point; break. This avoids
-            # accepting a small in-progress partial that would force vLLM
-            # to recompute more tokens than necessary.
-            # Compute max storable tokens (LMCache only stores complete chunks).
-            # Retry whenever hit < max_full_hit — covers both cold (hit==0) and
-            # partial-prefix cases (0 < hit < max_full_hit) where P-node may still
-            # be in the middle of ring prefill + store for the remaining tokens.
+            # When REPL=1 or PERSIST_KV=1 is active, the prefill ranks
+            # populate full HBM (REPL via post-AR full_replicate, PERSIST
+            # via ring kernel scatter), so the LMCache store is the same
+            # 1P-equivalent layout — no zigzag race exists and the first
+            # lookup returns full hit.  Entering retry there only burns
+            # ~1s per request for nothing.
+            #
+            # 1P (rp_size=1) has no zigzag at all, so retry is also moot.
+            #
+            # Inside the loop (zigzag cold path), retry until the hit
+            # count plateaus: if consecutive lookups return the same value
+            # the store has reached its saturation point; break.  This
+            # avoids accepting a small in-progress partial that would
+            # force vLLM to recompute more tokens than necessary.
             _consumer_chunk_size = getattr(self.config, "chunk_size", 256)
             _consumer_max_full_hit = (
                 (len(token_ids) // _consumer_chunk_size) * _consumer_chunk_size
             )
+            _zigzag_mode = (
+                int(_os.environ.get("VLLM_RING_REPLICATED_CACHE", "0")) == 0
+                and int(_os.environ.get("VLLM_RING_PERSIST_KV", "0")) == 0
+            )
             if (self.kv_role == "kv_consumer"
-                    and _rp_size >= 1
+                    and _rp_size >= 2
+                    and _zigzag_mode
                     and (num_external_hit_tokens or 0) < _consumer_max_full_hit
                     and len(token_ids) >= 256):
                 import time as _time
