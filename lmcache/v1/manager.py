@@ -360,18 +360,11 @@ class LMCacheManager:
         local_worker_id, local_world_size = calculate_local_rank_and_world_size(
             self._vllm_config
         )
-        # Correct pp_rank formula for Moreh vLLM rank layout:
-        # [PP0_RP0, PP1_RP0, PP0_RP1, PP1_RP1] — PP alternates every tp_size ranks.
-        # worker_id is PP-stage-aware so PP0 and PP1 use distinct mooncake keys.
-        _tp_size = parallel_config.tensor_parallel_size
-        _pp_size = parallel_config.pipeline_parallel_size
-        _pp_rank = (parallel_config.rank // _tp_size) % _pp_size
-        _pp_aware_worker_id = _pp_rank * _tp_size
         metadata = LMCacheMetadata(
             model_name=model_config.model,
             world_size=parallel_config.world_size,
             local_world_size=local_world_size,
-            worker_id=_pp_aware_worker_id,
+            worker_id=parallel_config.rank,
             local_worker_id=local_worker_id,
             kv_dtype=kv_dtype,
             kv_shape=kv_shape,
@@ -384,36 +377,16 @@ class LMCacheManager:
         )
 
         # Get tensor parallel group
-        # Determine kv_role from vllm_config for role-specific broadcast policy
-        _kv_role = None
-        if hasattr(self._vllm_config, "kv_transfer_config"):
-            _ktc = self._vllm_config.kv_transfer_config
-            if _ktc is not None:
-                _kv_role = getattr(_ktc, "kv_role", None)
-
         if role == "scheduler":
             tpg = SimpleNamespace()
             tpg.broadcast = lambda tensor, src: tensor
             tpg.broadcast_object = lambda obj, src: obj
             vllm_gpu_connector = None
         else:
-            _tpg = get_tp_group()
+            tpg = get_tp_group()
             vllm_gpu_connector = CreateGPUConnector(
                 self._config, metadata, EngineType.VLLM
             )
-            if _kv_role == "kv_producer":
-                # P server (kv_producer) must not broadcast on a separate CUDA
-                # stream: ROCm RCCL "Duplicate GPU detected" fires when the TP
-                # communicator is first used on broadcast_stream (lazy-init).
-                # P server only stores KV; retrieving from mooncake on P server
-                # is an optimisation that is not needed for correctness, so
-                # using a no-op broadcast is safe here.
-                tpg = SimpleNamespace()
-                tpg.broadcast = lambda tensor, src: tensor
-                tpg.broadcast_object = lambda obj, src: obj
-            else:
-                # D server (kv_consumer) or unspecified: use real TP broadcast
-                tpg = _tpg
 
         engine = LMCacheEngineBuilder.get_or_create(
             ENGINE_NAME,
