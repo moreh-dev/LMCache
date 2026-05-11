@@ -377,6 +377,9 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
 
         kv_cache_pointers = self._initialize_pointers(self.kvcaches)
 
+        # Ensure store_stream sees completed ring-attention KV writes from the
+        # default CUDA stream before starting the D2H copy.
+        self.store_stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.store_stream):
             if self.gpu_buffer is None or end - start != self.gpu_buffer.shape[2]:
                 lmc_ops.multi_layer_kv_transfer(
@@ -565,6 +568,9 @@ class VLLMPagedMemGPUConnectorV3(GPUConnectorInterface):
         assert self.kvcaches[0].device == self.device
         self._initialize_kv_cache_pointers()
         assert self.group_kv_cache_pointers_on_gpu is not None
+        # Ensure store_stream sees completed ring-attention KV writes from the
+        # default CUDA stream before starting the D2H copy.
+        self.store_stream.wait_stream(torch.cuda.current_stream())
         with torch.cuda.stream(self.store_stream):
             if not self.use_gpu or end - start != self.chunk_size:
                 for i, kv_cache_pointer in enumerate(

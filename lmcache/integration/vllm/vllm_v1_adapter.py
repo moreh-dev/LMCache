@@ -281,6 +281,10 @@ class ReqMeta:
     # Whether is last prefill or not
     is_last_prefill: bool = False
 
+    # Actual prompt length before LMCache-alignment truncation.
+    # Used by _allgather_rp_boundary_kv to compute the correct ring_chunk_len.
+    prompt_len: int = 0
+
     # Skip save or not
     save_spec: Optional[SaveSpec] = None
     # load_spec
@@ -437,6 +441,7 @@ class ReqMeta:
             token_ids=token_ids,
             slot_mapping=slot_mapping,
             is_last_prefill=is_last_prefill,
+            prompt_len=tracker.prompt_len,
             save_spec=save_spec,
             load_spec=load_spec,
             disagg_spec=tracker.disagg_spec,
@@ -650,6 +655,238 @@ class LMCacheConnectorV1Impl:
     def lookup_server(self):
         """Get the lookup server from manager."""
         return self._manager.lookup_server
+
+    def _allgather_rp_boundary_kv(
+        self,
+        slot_mapping: torch.Tensor,
+        full_token_len: int,
+        actual_isl: int = 0,
+    ) -> None:
+        """All-reduce KV boundary blocks so every RP rank has correct data.
+
+        Called in wait_for_save BEFORE LMCache reads GPU KV blocks.  Both RP
+        ranks must call this for the same request simultaneously (they are
+        always in the same batch for ring attention, so this is guaranteed).
+
+        VLLM_RING_ALLREDUCE_LMCACHE=1 enables this path.  Unlike the
+        NIXL P2P path (_allgather_rp_kv), this operates directly on
+        self.kv_caches (the GPU KV tensors shared with LMCache) using
+        slot_mapping to identify which physical blocks are boundary blocks.
+
+        actual_isl: the true prompt length before LMCache-alignment truncation.
+        ring_chunk_len must be computed from actual_isl, not full_token_len,
+        because the ring attention kernel used the full prompt length when
+        deciding which rank owns which tokens.  Using full_token_len (the
+        truncated LMCache length) produces a smaller ring_chunk_len and
+        incorrectly identifies tokens in [trunc_rcl, actual_rcl) as gap blocks,
+        zeroing KV that the current rank actually owns.
+        """
+        rp = self._rp_world_size
+        r = self._rp_rank
+        if rp <= 1 or full_token_len == 0 or len(slot_mapping) == 0:
+            return
+
+        try:
+            from vllm.distributed.parallel_state import get_rp_group
+            rp_group = get_rp_group()
+        except Exception:
+            return
+
+        block_size = self._parent._vllm_config.cache_config.block_size
+
+        rp_align = 2 * rp
+        # Use actual_isl (full prompt length) for ring_chunk_len so that
+        # ownership boundaries match what the ring attention kernel computed.
+        # Fall back to full_token_len if actual_isl was not provided.
+        isl_for_rcl = actual_isl if actual_isl > 0 else full_token_len
+        ring_chunk_len = (isl_for_rcl + rp_align - 1) // rp_align
+
+        head_start = ring_chunk_len * r
+        head_end   = min(head_start + ring_chunk_len, full_token_len)
+        tail_start = ring_chunk_len * (2 * rp - 1 - r)
+        tail_end   = min(tail_start + ring_chunk_len, full_token_len)
+
+        dev = slot_mapping.device
+        # Filter out invalid slots (-1 from padding)
+        valid = slot_mapping >= 0
+        if not valid.all():
+            slot_mapping = slot_mapping.clone()
+            slot_mapping[~valid] = 0  # temporary; filtered out below
+
+        P = torch.arange(full_token_len, device=dev, dtype=torch.long)
+        owned = (
+            ((P >= head_start) & (P < head_end))
+            | ((P >= tail_start) & (P < tail_end))
+        )
+        if not valid.all():
+            owned = owned & valid  # pad positions are not owned
+
+        phys_bid = slot_mapping // block_size   # [full_token_len]
+        phys_off = slot_mapping % block_size    # [full_token_len]
+
+        unique_bids, inv = torch.unique(phys_bid, return_inverse=True)
+        n_unique = len(unique_bids)
+        owned_cnt   = torch.zeros(n_unique, dtype=torch.long, device=dev)
+        unowned_cnt = torch.zeros(n_unique, dtype=torch.long, device=dev)
+        owned_cnt.scatter_add_(0, inv, owned.long())
+        unowned_cnt.scatter_add_(0, inv, (~owned & valid).long())
+
+        is_boundary = (owned_cnt > 0) & (unowned_cnt > 0)
+
+        # Extend to "gap blocks": positions inside a rank's chunk-aligned LMCache
+        # store range that fall BEYOND that rank's true ring-ownership boundary.
+        # These blocks contain garbage on the non-owning rank and must be
+        # all-reduced so the owning rank's correct data overwrites them.
+        # The condition is computed symmetrically over all RP ranks so both
+        # sides of the all_reduce compute identical boundary_bids.
+        lmcache_cs = self._lmcache_chunk_size
+        if lmcache_cs and lmcache_cs > 0:
+            # rcl_raw (floor) mirrors the store path in wait_for_save
+            rcl_raw_fl = full_token_len // rp_align
+            # chunk-aligned store boundary (may exceed ring_chunk_len)
+            rcl_st = ((rcl_raw_fl + lmcache_cs - 1) // lmcache_cs) * lmcache_cs
+            if rcl_st > ring_chunk_len:
+                # gap exists: [ring_chunk_len, rcl_st) positions are stored but unowned
+                is_gap_pos = torch.zeros(full_token_len, dtype=torch.bool, device=dev)
+                for rr in range(rp):
+                    rr_h_s = ring_chunk_len * rr
+                    rr_h_e = min(ring_chunk_len * (rr + 1), full_token_len)
+                    rr_t_s = ring_chunk_len * (2 * rp - 1 - rr)
+                    rr_t_e = min(ring_chunk_len * (2 * rp - rr), full_token_len)
+                    rr_owned = (
+                        ((P >= rr_h_s) & (P < rr_h_e))
+                        | ((P >= rr_t_s) & (P < rr_t_e))
+                    )
+                    ss_h_s = rcl_st * rr
+                    ss_h_e = min(rcl_st * (rr + 1), full_token_len)
+                    ss_t_s = rcl_st * (2 * rp - 1 - rr)
+                    ss_t_e = min(rcl_st * (2 * rp - rr), full_token_len)
+                    in_store_rr = (
+                        ((P >= ss_h_s) & (P < ss_h_e))
+                        | ((P >= ss_t_s) & (P < ss_t_e))
+                    )
+                    is_gap_pos |= (in_store_rr & ~rr_owned & valid)
+                gap_cnt = torch.zeros(n_unique, dtype=torch.long, device=dev)
+                gap_cnt.scatter_add_(0, inv, is_gap_pos.long())
+                n_gap = int(gap_cnt.gt(0).sum().item())
+                if n_gap:
+                    print(
+                        f"[DBG allgather gap] rank={r}/{rp} isl={full_token_len} "
+                        f"rcl_st={rcl_st} ring_chunk_len={ring_chunk_len} "
+                        f"n_gap_blocks={n_gap}",
+                        flush=True,
+                    )
+                is_boundary = is_boundary | (gap_cnt > 0)
+
+        if not is_boundary.any():
+            return
+
+        boundary_idxs = is_boundary.nonzero(as_tuple=True)[0]
+        boundary_bids = unique_bids[boundary_idxs].tolist()
+        n_boundary = len(boundary_bids)
+
+        # Build [n_boundary, block_size] ownership mask
+        boundary_mask = torch.zeros(n_boundary, block_size, dtype=torch.bool, device=dev)
+        for local_i, uid_idx in enumerate(boundary_idxs.tolist()):
+            pos_in_blk = (inv == uid_idx).nonzero(as_tuple=True)[0]
+            offs = phys_off[pos_in_blk]
+            own  = owned[pos_in_blk]
+            boundary_mask[local_i].scatter_(0, offs[own].long(), True)
+
+        import sys
+        print(
+            f"[DBG allgather] rank={r}/{rp} isl={full_token_len} actual_isl={isl_for_rcl} "
+            f"rcl={ring_chunk_len} n_boundary={n_boundary} "
+            f"head=[{head_start},{head_end}) tail=[{tail_start},{tail_end})",
+            flush=True,
+        )
+
+        # Per-token cache layout (e.g., MLA on DeepSeek-R1: cache.shape =
+        # [num_total_slots, 1, hidden_per_slot] — no explicit block_size dim).
+        # The cache is indexed per slot, not per block, so boundary-block tokens
+        # must be addressed by slot_mapping directly. Detect by: no dim equals
+        # block_size AND shape[0] is much larger than the implied num_blocks
+        # (slot_max // block_size + 1). Existing per-block paths skip such caches
+        # (block_dim_idx == -1 → skip-with-warning), which leaves stale KV.
+        first_cache_obj = next(iter(self.kv_caches.values()))
+        first_dims = first_cache_obj.shape
+        block_dim_in_cache = -1
+        for idx, dim in enumerate(first_dims):
+            if idx > 0 and dim == block_size:
+                block_dim_in_cache = idx
+                break
+        try:
+            slot_max_int = int(slot_mapping.max().item())
+        except Exception:
+            slot_max_int = 0
+        implied_num_blocks = slot_max_int // block_size + 1
+        is_per_token_cache = (
+            block_dim_in_cache == -1
+            and first_dims[0] >= slot_max_int + 1
+            and first_dims[0] > implied_num_blocks * 2
+        )
+
+        if is_per_token_cache:
+            # Index by per-slot. Boundary tokens = tokens whose block is a
+            # boundary block, computed via is_boundary[inv].
+            in_bblk = is_boundary[inv] & valid           # [full_token_len]
+            btok_slots = slot_mapping[in_bblk]           # [n_btoks]
+            btok_owned = owned[in_bblk]                  # [n_btoks]
+            for cache in self.kv_caches.values():
+                selected = cache[btok_slots]             # [n_btoks, ...rest]
+                view_shape = [selected.shape[0]] + [1] * (selected.dim() - 1)
+                dev_mask = btok_owned.to(selected.device).view(view_shape)
+                selected.masked_fill_(~dev_mask, 0)
+                torch.distributed.all_reduce(
+                    selected,
+                    op=torch.distributed.ReduceOp.SUM,
+                    group=rp_group.device_group,
+                )
+                cache[btok_slots] = selected
+            return
+
+        first_cache = True
+        for cache in self.kv_caches.values():
+            selected = cache[boundary_bids]   # copy [n_boundary, ...]
+            dims = selected.shape
+            block_dim_idx = -1
+            for idx, dim in enumerate(dims):
+                if idx > 0 and dim == block_size:
+                    block_dim_idx = idx
+                    break
+            if block_dim_idx == -1:
+                if first_cache:
+                    print(
+                        f"[DBG allgather] rank={r} block_dim_idx=-1 "
+                        f"cache.shape={dims} block_size={block_size} SKIPPING all_reduce!",
+                        flush=True,
+                    )
+                    first_cache = False
+                continue
+
+            if first_cache:
+                norm_before = selected.float().norm().item()
+            view_shape = [1] * len(dims)
+            view_shape[0] = n_boundary
+            view_shape[block_dim_idx] = block_size
+            dev_mask = boundary_mask.to(selected.device).view(view_shape)
+
+            selected.masked_fill_(~dev_mask, 0)
+            torch.distributed.all_reduce(
+                selected,
+                op=torch.distributed.ReduceOp.SUM,
+                group=rp_group.device_group,
+            )
+            if first_cache:
+                norm_after = selected.float().norm().item()
+                print(
+                    f"[DBG allgather] rank={r}/{rp} isl={full_token_len} "
+                    f"n_boundary={n_boundary} cache.shape={dims} block_dim={block_dim_idx} "
+                    f"norm_before={norm_before:.3f} norm_after={norm_after:.3f}",
+                    flush=True,
+                )
+                first_cache = False
+            cache[boundary_bids] = selected
 
     def _compute_ring_store_mask(
         self, total_tokens: int
@@ -1242,9 +1479,27 @@ class LMCacheConnectorV1Impl:
 
             # Capture the full sequence length before any truncation for ring mask.
             full_token_len = len(token_ids)
+            print(
+                f"[DBG wait_for_save] rank={self._rp_rank}/{self._rp_world_size} "
+                f"token_ids_len={len(token_ids)} slot_mapping_len={len(slot_mapping)} "
+                f"is_last_prefill={request.is_last_prefill} "
+                f"skip_leading={skip_leading_tokens}",
+                flush=True,
+            )
 
             store_mask = torch.ones(full_token_len, dtype=torch.bool)
             store_mask[:skip_leading_tokens] = False
+
+            # Ring boundary all-reduce: fill zeros at boundary blocks so
+            # LMCache stores correct KV for all positions.
+            # VLLM_RING_ALLREDUCE_LMCACHE=1 enables; both RP ranks must be
+            # processing the same request batch simultaneously.
+            if (self._rp_world_size > 1
+                    and int(os.environ.get("VLLM_RING_ALLREDUCE_LMCACHE", "1"))):
+                self._allgather_rp_boundary_kv(
+                    slot_mapping, full_token_len,
+                    actual_isl=request.prompt_len,
+                )
 
             is_last_prefill = request.is_last_prefill
             if is_last_prefill:
@@ -1270,7 +1525,7 @@ class LMCacheConnectorV1Impl:
                 # [(2RP-1-r)*rcl, (2RP-r)*rcl), each with a proper prefix mask.
                 chunk_size = self._lmcache_chunk_size
                 rcl_raw = full_token_len // (2 * self._rp_world_size)
-                rcl = (rcl_raw // chunk_size) * chunk_size
+                rcl = ((rcl_raw + chunk_size - 1) // chunk_size) * chunk_size
                 if rcl == 0:
                     # Sequence too short for chunk-aligned ring KV caching.
                     logger.debug(
@@ -1290,11 +1545,11 @@ class LMCacheConnectorV1Impl:
                 head_end = min((r + 1) * rcl, token_len)
                 tail_start = (2 * rp - 1 - r) * rcl
                 tail_end = min((2 * rp - r) * rcl, token_len)
-                logger.debug(
-                    "Ring attention store: rank=%d/%d head=[%d,%d) "
-                    "tail=[%d,%d) total=%d request=%s",
-                    r, rp, head_start, head_end,
-                    tail_start, tail_end, token_len, request.req_id,
+                print(
+                    f"[DBG store] rank={r}/{rp} isl_full={full_token_len} "
+                    f"token_len={token_len} rcl_raw={rcl_raw} rcl={rcl} "
+                    f"head=[{head_start},{head_end}) tail=[{tail_start},{tail_end})",
+                    flush=True,
                 )
                 # HEAD region: token_ids[:head_end], prefix-Falses=head_start
                 # num_falses = head_start = r * rcl (multiple of chunk_size ✓)
@@ -1650,6 +1905,14 @@ class LMCacheConnectorV1Impl:
             num_tokens_to_compute = (
                 request.num_computed_tokens
                 + scheduler_output.num_scheduled_tokens[request.req_id]
+            )
+            print(
+                f"[DBG new_req] req={request.req_id[:16]} "
+                f"num_computed={request.num_computed_tokens} "
+                f"num_scheduled={scheduler_output.num_scheduled_tokens[request.req_id]} "
+                f"num_tokens_to_compute={num_tokens_to_compute} "
+                f"prompt_token_ids_len={len(request.prompt_token_ids)}",
+                flush=True,
             )
             lmcache_cached_tokens = 0
             if load_spec is not None:
