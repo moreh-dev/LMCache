@@ -661,6 +661,7 @@ class LMCacheConnectorV1Impl:
         slot_mapping: torch.Tensor,
         full_token_len: int,
         actual_isl: int = 0,
+        skip_leading_tokens: int = 0,
     ) -> None:
         """All-reduce KV boundary blocks so every RP rank has correct data.
 
@@ -721,6 +722,24 @@ class LMCacheConnectorV1Impl:
         if not valid.all():
             owned = owned & valid  # pad positions are not owned
 
+        # For new positions (P >= skip_leading_tokens), replace ring-owned mask
+        # with "actually_computed" mask. When 3*rcl >= orig_num_scheduled, rank r
+        # never writes its tail positions (all scheduling slots are padding), so
+        # those physical blocks contain stale data. Using ring-owned here would
+        # keep the stale values instead of zeroing them before the all_reduce.
+        if skip_leading_tokens > 0:
+            skip = skip_leading_tokens
+            new_pos = P >= skip
+            new_head_s = skip + r * ring_chunk_len
+            new_head_e = skip + (r + 1) * ring_chunk_len
+            new_tail_s = skip + (2 * rp - 1 - r) * ring_chunk_len
+            new_tail_e = skip + (2 * rp - r) * ring_chunk_len
+            actually_computed = (
+                ((P >= new_head_s) & (P < new_head_e))
+                | ((P >= new_tail_s) & (P < new_tail_e))
+            )
+            owned = torch.where(new_pos, actually_computed, owned)
+
         phys_bid = slot_mapping // block_size   # [full_token_len]
         phys_off = slot_mapping % block_size    # [full_token_len]
 
@@ -777,6 +796,41 @@ class LMCacheConnectorV1Impl:
                         flush=True,
                     )
                 is_boundary = is_boundary | (gap_cnt > 0)
+
+        # Stale-uncomputed blocks: positions that are ring-owned by some rank
+        # but not actually computed because tail tokens were all padding
+        # (3*rcl >= orig_num_scheduled). Computed symmetrically over all ranks
+        # so both sides of the all_reduce produce identical boundary_bids.
+        if skip_leading_tokens > 0:
+            skip = skip_leading_tokens
+            is_stale_any = torch.zeros(full_token_len, dtype=torch.bool, device=dev)
+            for rr in range(rp):
+                rr_ring_owned = (
+                    ((P >= rr * ring_chunk_len) & (P < (rr + 1) * ring_chunk_len))
+                    | ((P >= (2*rp-1-rr)*ring_chunk_len) & (P < (2*rp-rr)*ring_chunk_len))
+                )
+                rr_new_head = (
+                    (P >= skip + rr * ring_chunk_len)
+                    & (P < skip + (rr + 1) * ring_chunk_len)
+                )
+                rr_new_tail = (
+                    (P >= skip + (2*rp-1-rr) * ring_chunk_len)
+                    & (P < skip + (2*rp-rr) * ring_chunk_len)
+                )
+                rr_actually_computed = rr_new_head | rr_new_tail
+                is_stale_any |= (
+                    (P >= skip) & rr_ring_owned & ~rr_actually_computed & valid
+                )
+            stale_cnt = torch.zeros(n_unique, dtype=torch.long, device=dev)
+            stale_cnt.scatter_add_(0, inv, is_stale_any.long())
+            n_stale = int(stale_cnt.gt(0).sum().item())
+            if n_stale:
+                print(
+                    f"[DBG allgather stale] rank={r}/{rp} skip={skip_leading_tokens} "
+                    f"rcl={ring_chunk_len} n_stale_blocks={n_stale}",
+                    flush=True,
+                )
+            is_boundary = is_boundary | (stale_cnt > 0)
 
         if not is_boundary.any():
             return
@@ -1499,6 +1553,7 @@ class LMCacheConnectorV1Impl:
                 self._allgather_rp_boundary_kv(
                     slot_mapping, full_token_len,
                     actual_isl=request.prompt_len,
+                    skip_leading_tokens=skip_leading_tokens,
                 )
 
             is_last_prefill = request.is_last_prefill
