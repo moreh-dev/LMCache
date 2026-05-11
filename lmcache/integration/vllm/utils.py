@@ -263,11 +263,13 @@ def create_lmcache_metadata(
     local_worker_id = parallel_cfg.rank % tp_size
 
     # Create metadata
+    # Use local (intra-TP-group) world_size/worker_id so that prefill (RP=2,
+    # world_size=16) and decode (world_size=8) generate matching CacheEngineKeys.
     metadata = LMCacheMetadata(
         model_name=model_cfg.model,
-        world_size=parallel_cfg.world_size,
+        world_size=local_world_size,
         local_world_size=local_world_size,
-        worker_id=parallel_cfg.rank,
+        worker_id=local_worker_id,
         local_worker_id=local_worker_id,
         kv_dtype=kv_dtype,
         kv_shape=kv_shape,

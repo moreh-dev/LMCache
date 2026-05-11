@@ -245,6 +245,24 @@ class VLLMPagedMemGPUConnectorV2(GPUConnectorInterface):
             kv_caches, kv_layout=self.layout_hints.get("kv_layout")
         )
 
+        # Use actual kv_caches length instead of self.num_layers to handle
+        # uneven PP splits (e.g. DeepSeek-R1 61 layers / PP=2 → 31 + 30)
+        actual_num_layers = len(kv_caches)
+        if actual_num_layers != self.num_layers:
+            self.num_layers = actual_num_layers
+            self.kv_cache_pointers = torch.empty(
+                actual_num_layers, dtype=torch.int64, device="cpu"
+            )
+            # Re-create gpu_buffer to match the actual layer count;
+            # without this, from_gpu hits a shape mismatch when
+            # memory_obj (actual layers) != gpu_buffer (metadata layers).
+            if self.gpu_buffer is not None:
+                self.gpu_buffer = torch.empty(
+                    [self.gpu_buffer.shape[0], actual_num_layers,
+                     self.gpu_buffer.shape[2], self.gpu_buffer.shape[3]],
+                    dtype=self.gpu_buffer.dtype,
+                    device=self.gpu_buffer.device,
+                )
         self.kv_cache_pointers.numpy()[:] = [t.data_ptr() for t in kv_caches]
         self.kv_cache_pointers_on_gpu[idx] = torch.empty(
             self.num_layers, dtype=torch.int64, device=self.device

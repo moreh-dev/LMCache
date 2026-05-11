@@ -79,6 +79,13 @@ class RemoteBackend(StorageBackendInterface):
             and metadata.world_size > 1
             and metadata.local_worker_id != 0
         )
+        # Target worker_id for MLA key dedup: first rank of this PP stage.
+        # Without this, PP stage 1's non-zero TP ranks would map to worker_id=0
+        # (PP stage 0's first rank), causing key collisions across PP stages.
+        self._mla_target_worker_id = (
+            (metadata.worker_id // metadata.local_world_size)
+            * metadata.local_world_size
+        )
         logger.info(f"metadata={metadata}")
         logger.info(
             f"Connected to remote storage at {config.remote_url}, "
@@ -167,7 +174,7 @@ class RemoteBackend(StorageBackendInterface):
 
         # For MLA worker id as 0 mode, use worker_id 0
         if self._mla_worker_id_as0_mode:
-            key = key.with_new_worker_id(0)
+            key = key.with_new_worker_id(self._mla_target_worker_id)
 
         try:
             if self.config.extra_config is not None and self.config.extra_config.get(
@@ -198,7 +205,7 @@ class RemoteBackend(StorageBackendInterface):
             return super().batched_contains(keys, pin)
 
         if self._mla_worker_id_as0_mode:
-            keys = [key.with_new_worker_id(0) for key in keys]
+            keys = [key.with_new_worker_id(self._mla_target_worker_id) for key in keys]
 
         try:
             return self.connection.batched_contains(keys)
@@ -359,7 +366,7 @@ class RemoteBackend(StorageBackendInterface):
             return None
         # For MLA worker id as 0 mode, use worker_id 0
         if self._mla_worker_id_as0_mode:
-            key = key.with_new_worker_id(0)
+            key = key.with_new_worker_id(self._mla_target_worker_id)
         t1 = time.perf_counter()
         future = asyncio.run_coroutine_threadsafe(self.connection.get(key), self.loop)
 
@@ -412,7 +419,7 @@ class RemoteBackend(StorageBackendInterface):
 
         # For MLA worker id as 0 mode, use worker_id 0
         if self._mla_worker_id_as0_mode:
-            keys = [key.with_new_worker_id(0) for key in keys]
+            keys = [key.with_new_worker_id(self._mla_target_worker_id) for key in keys]
 
         t1 = time.perf_counter()
         # batched get
@@ -520,7 +527,7 @@ class RemoteBackend(StorageBackendInterface):
             logger.warning("Connection is None in batched_async_contains, returning 0")
             return 0
         if self._mla_worker_id_as0_mode:
-            keys = [key.with_new_worker_id(0) for key in keys]
+            keys = [key.with_new_worker_id(self._mla_target_worker_id) for key in keys]
 
         try:
             assert self.connection.support_batched_async_contains(), (
