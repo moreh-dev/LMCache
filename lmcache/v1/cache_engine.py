@@ -465,6 +465,14 @@ class LMCacheEngine:
                 request_configs=request_configs,
             ):
                 assert isinstance(key, CacheEngineKey)
+                # Skip chunks that already exist in remote storage to
+                # avoid RDMA write/read collisions when a decode node is
+                # concurrently retrieving the same chunk.
+                if self.storage_manager.contains(
+                    key, self.retrieve_locations
+                ):
+                    prev_key = key.chunk_hash
+                    continue
                 # Allocate the memory object
                 num_tokens = end - start
                 kv_shapes = self.metadata.get_shapes(num_tokens)
