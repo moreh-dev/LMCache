@@ -255,13 +255,20 @@ def create_lmcache_metadata(
                 kv_transfer_config, "kv_connector_extra_config", None
             )
 
+    # Compute local rank/world_size correctly, accounting for ring_parallel_size.
+    # TP is always intra-node, so local_world_size = tp_size and
+    # local_worker_id = global_rank % tp_size regardless of RP/PP grouping.
+    tp_size = parallel_cfg.tensor_parallel_size
+    local_world_size = tp_size
+    local_worker_id = parallel_cfg.rank % tp_size
+
     # Create metadata
     metadata = LMCacheMetadata(
         model_name=model_cfg.model,
         world_size=parallel_cfg.world_size,
-        local_world_size=parallel_cfg.world_size,
+        local_world_size=local_world_size,
         worker_id=parallel_cfg.rank,
-        local_worker_id=parallel_cfg.rank,
+        local_worker_id=local_worker_id,
         kv_dtype=kv_dtype,
         kv_shape=kv_shape,
         use_mla=use_mla,
@@ -362,6 +369,7 @@ def calculate_local_rank_and_world_size(vllm_config: "VllmConfig") -> Tuple[int,
     Current assumption (TODO: add custom logic in the future):
     - Tensor Parallel is intra-node
     - Pipeline Parallel is inter-node
+    - Ring Parallel (sequence parallelism / USP) is intra-node but spans TP groups
 
     Returns:
         Tuple[int, int]: (local_worker_id, local_world_size)
@@ -369,10 +377,26 @@ def calculate_local_rank_and_world_size(vllm_config: "VllmConfig") -> Tuple[int,
     parallel_config = vllm_config.parallel_config
     global_rank = parallel_config.rank
     global_world_size = parallel_config.world_size
+    # Account for ring_parallel_size (sequence parallelism / USP) if present.
+    # In vLLM-PCP, world_size = TP * RP (with PP=1), so even on a single node
+    # global_world_size can equal num_gpus while local (intra-RP-group) world size
+    # is only TP.  We must handle this before the num_gpus check.
+    rp_size = getattr(parallel_config, "ring_parallel_size", 1)
+    if rp_size > 1:
+        tp_size = parallel_config.tensor_parallel_size
+        pp_size = parallel_config.pipeline_parallel_size
+        local_world_size = global_world_size // (pp_size * rp_size)
+        assert local_world_size == tp_size, (
+            "LMCache is operating under the assumption that the "
+            "local world size is equal to the tensor parallel size "
+            "in ring parallel deployment."
+        )
+        local_worker_id = global_rank % local_world_size
+        return local_worker_id, local_world_size
     torch_dev, dev_name = get_vllm_torch_dev()
     num_gpus = torch_dev.device_count()
     if global_world_size <= num_gpus:
-        # single node case
+        # single node case (no ring parallel)
         return parallel_config.rank, parallel_config.world_size
     else:
         tp_size = parallel_config.tensor_parallel_size

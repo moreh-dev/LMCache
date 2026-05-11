@@ -537,7 +537,7 @@ class VLLMPagedMemGPUConnectorV3(GPUConnectorInterface):
             )
 
     @_lmcache_nvtx_annotate
-    def from_gpu(self, memory_obj: MemoryObj, start: int, end: int, **kwargs):
+    def from_gpu(self, memory_obj: MemoryObj, start: int, end: int, do_sync: bool = True, **kwargs):
         assert memory_obj.raw_tensor is not None
         assert "slot_mapping" in kwargs
 
@@ -587,10 +587,7 @@ class VLLMPagedMemGPUConnectorV3(GPUConnectorInterface):
                     assert memory_obj_tensor is not None
                     memory_obj_tensor.copy_(tmp_gpu_buffer, non_blocking=True)
 
-        if not memory_obj.raw_tensor.is_cuda:
-            # Force a synchronize if the target buffer is NOT CUDA device
-            # NOTE: for better performance, we may not want to sync for every
-            # memory object
+        if not memory_obj.raw_tensor.is_cuda and do_sync:
             self.store_stream.synchronize()
 
         if self.use_mla:
@@ -603,8 +600,17 @@ class VLLMPagedMemGPUConnectorV3(GPUConnectorInterface):
         self.load_stream.synchronize()
 
     def batched_from_gpu(self, memory_objs, starts, ends, **kwargs):
+        # Submit all chunk transfers without per-chunk sync, then sync once.
+        # This mirrors batched_to_gpu and avoids N_chunks stream synchronizations
+        # (e.g. 125 syncs for 32k tokens / chunk_size=256) on the CPU-target path.
+        any_cpu = any(
+            mo.raw_tensor is not None and not mo.raw_tensor.is_cuda
+            for mo in memory_objs
+        )
         for memory_obj, start, end in zip(memory_objs, starts, ends, strict=False):
-            self.from_gpu(memory_obj, start, end, **kwargs)
+            self.from_gpu(memory_obj, start, end, do_sync=False, **kwargs)
+        if any_cpu:
+            self.store_stream.synchronize()
 
     def get_shape(self, num_tokens: int) -> torch.Size:
         raise NotImplementedError

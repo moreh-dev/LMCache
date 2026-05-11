@@ -66,8 +66,13 @@ class LMCacheMetadata:
     kv_connector_extra_config: Optional[dict] = None
 
     def is_first_rank(self) -> bool:
-        """Check if the current worker is the first rank"""
-        return self.worker_id == self.first_rank
+        """Check if the current worker is the first rank within its TP group.
+
+        Uses local_worker_id (rank within TP group) rather than global worker_id
+        so that RP > 1 deployments correctly identify the first rank of each
+        TP group (not just the globally first worker).
+        """
+        return self.local_worker_id == self.first_rank
 
     # TODO(chunxiaozheng): some uts do not `build_kv_layer_groups`
     def get_dtypes(self) -> list[torch.dtype]:
